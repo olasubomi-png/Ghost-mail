@@ -29,6 +29,33 @@ function safeEqualUtf8(a: string, b: string): boolean {
 }
 
 /**
+ * Parse application/x-www-form-urlencoded bodies including bracket keys
+ * like signature[timestamp], signature[token], signature[signature].
+ */
+export function parseFormBody(rawBody: string): Record<string, unknown> {
+  const params = new URLSearchParams(rawBody);
+  const result: Record<string, unknown> = {};
+  const nested: Record<string, Record<string, string>> = {};
+
+  for (const [key, value] of params.entries()) {
+    const match = key.match(/^([^[\]]+)\[([^[\]]+)\]$/);
+    if (match) {
+      const [, parent, child] = match;
+      if (!nested[parent]) nested[parent] = {};
+      nested[parent][child] = value;
+    } else {
+      result[key] = value;
+    }
+  }
+
+  for (const [parent, children] of Object.entries(nested)) {
+    result[parent] = children;
+  }
+
+  return result;
+}
+
+/**
  * Verify Mailgun signature.
  * Algorithm: HMAC-SHA256(timestamp + token, signingKey) === signature (hex)
  * https://documentation.mailgun.com/docs/mailgun/user-manual/webhooks/securing-webhooks
@@ -47,7 +74,7 @@ export function verifyMailgunSignature(
   }
 
   const expected = createHmac("sha256", signingKey)
-    .update(timestamp + token)
+    .update(String(timestamp) + String(token))
     .digest("hex");
 
   return safeEqualHex(expected, signature);
@@ -56,7 +83,6 @@ export function verifyMailgunSignature(
 /**
  * Verify Resend / Svix webhook signature.
  * https://docs.svix.com/receiving/verifying-payloads/how-manual
- * https://resend.com/docs/webhooks/verify-webhooks-requests
  */
 export function verifyResendSignature(
   webhookSecret: string,
@@ -107,9 +133,6 @@ export function verifyResendSignature(
   return false;
 }
 
-/**
- * Generic HMAC-SHA256 of raw body. Header: X-Webhook-Signature: sha256=<hex>
- */
 export function verifyGenericSignature(
   secret: string,
   rawBody: string,
@@ -121,14 +144,24 @@ export function verifyGenericSignature(
   return safeEqualHex(expected, match[1]);
 }
 
+/**
+ * Extract Mailgun timestamp/token/signature from headers and/or parsed body.
+ * Supports:
+ * - JSON event webhooks: body.signature.{timestamp,token,signature}
+ * - Form posts: signature[timestamp], signature[token], signature[signature]
+ * - Flat form: timestamp, token, signature
+ * - Headers: X-Mailgun-Timestamp, X-Mailgun-Token, X-Mailgun-Signature
+ */
 export function extractMailgunAuth(
   headers: Headers,
   body: unknown
 ): { timestamp: string; token: string; signature: string } | null {
   if (body && typeof body === "object") {
     const b = body as Record<string, unknown>;
+
+    // Nested signature object (JSON events or parsed bracket form)
     const sigObj = b.signature;
-    if (sigObj && typeof sigObj === "object") {
+    if (sigObj && typeof sigObj === "object" && !Array.isArray(sigObj)) {
       const s = sigObj as Record<string, unknown>;
       const timestamp = String(s.timestamp ?? "");
       const token = String(s.token ?? "");
@@ -137,7 +170,9 @@ export function extractMailgunAuth(
         return { timestamp, token, signature };
       }
     }
-    if (b.timestamp && b.token && b.signature) {
+
+    // Flat form fields
+    if (b.timestamp && b.token && b.signature && typeof b.signature === "string") {
       return {
         timestamp: String(b.timestamp),
         token: String(b.token),
@@ -146,12 +181,14 @@ export function extractMailgunAuth(
     }
   }
 
+  // Headers (JSON route style)
   const timestamp = headers.get("x-mailgun-timestamp") || "";
   const signature = headers.get("x-mailgun-signature") || "";
   const token = headers.get("x-mailgun-token") || "";
   if (timestamp && token && signature) {
     return { timestamp, token, signature };
   }
+
   return null;
 }
 
@@ -164,7 +201,9 @@ export function verifyWebhookSignature(
   const secret = process.env.INBOUND_WEBHOOK_SECRET;
   if (!secret) {
     if (process.env.NODE_ENV === "production") {
-      console.warn("[webhook] INBOUND_WEBHOOK_SECRET not set in production – rejecting");
+      console.warn(
+        "[webhook] INBOUND_WEBHOOK_SECRET not set in production – rejecting"
+      );
       return false;
     }
     return true;
@@ -177,11 +216,7 @@ export function verifyWebhookSignature(
         try {
           body = JSON.parse(rawBody);
         } catch {
-          try {
-            body = Object.fromEntries(new URLSearchParams(rawBody).entries());
-          } catch {
-            body = undefined;
-          }
+          body = parseFormBody(rawBody);
         }
       }
       const auth = extractMailgunAuth(headers, body);
@@ -242,18 +277,21 @@ export function normalizeInboundPayload(
     } else if (provider === "resend" && typeof body === "object" && body !== null) {
       const b = body as Record<string, unknown>;
       const data = (b.data as Record<string, unknown>) || b;
-      const toField = data.to;
+      const toField = data.to ?? data.received_for;
       const toAddr = Array.isArray(toField)
         ? String((toField as string[])[0] || "")
         : String(toField || "");
       candidate = {
+        // Prefer provider email_id for Receiving API; message_id is MIME Message-ID
         externalId: data.email_id || data.id || b.id,
         to: toAddr,
         from: data.from,
         subject: data.subject || "(no subject)",
         textBody: data.text,
         htmlBody: data.html,
-        receivedAt: data.created_at ? new Date(String(data.created_at)) : undefined,
+        receivedAt: data.created_at
+          ? new Date(String(data.created_at))
+          : undefined,
       };
     } else if (typeof body === "object" && body !== null) {
       const b = body as Record<string, unknown>;
@@ -293,33 +331,111 @@ export function normalizeInboundPayload(
   }
 }
 
+export type ResendFetchResult =
+  | {
+      ok: true;
+      text?: string;
+      html?: string;
+      subject?: string;
+      from?: string;
+      to?: string;
+    }
+  | { ok: false; status: number; retryable: boolean; reason: string };
+
 /**
- * Optionally fetch full message from Resend when webhook only has an ID.
- * Requires RESEND_API_KEY. Never logs the key or full response.
+ * Fetch full received-email content from Resend Receiving API.
+ * Endpoint: GET https://api.resend.com/emails/receiving/:email_id
+ * Docs: https://resend.com/docs/api-reference/emails/retrieve-received-email
+ *
+ * Webhooks only include metadata — body must be fetched separately.
  */
 export async function fetchResendEmailContent(
-  emailId: string
-): Promise<{ text?: string; html?: string; subject?: string; from?: string } | null> {
+  emailId: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<ResendFetchResult> {
   const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey || !emailId) return null;
+  if (!apiKey) {
+    return {
+      ok: false,
+      status: 0,
+      retryable: false,
+      reason: "RESEND_API_KEY not configured",
+    };
+  }
+  if (!emailId) {
+    return {
+      ok: false,
+      status: 0,
+      retryable: false,
+      reason: "missing email id",
+    };
+  }
 
   try {
-    const res = await fetch(`https://api.resend.com/emails/${emailId}`, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-    });
-    if (!res.ok) return null;
+    const res = await fetchImpl(
+      `https://api.resend.com/emails/receiving/${encodeURIComponent(emailId)}`,
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    if (res.status === 404) {
+      return {
+        ok: false,
+        status: 404,
+        retryable: false,
+        reason: "email not found",
+      };
+    }
+    if (res.status === 401 || res.status === 403) {
+      return {
+        ok: false,
+        status: res.status,
+        retryable: false,
+        reason: "unauthorized",
+      };
+    }
+    if (res.status === 429 || res.status >= 500) {
+      return {
+        ok: false,
+        status: res.status,
+        retryable: true,
+        reason: "provider unavailable",
+      };
+    }
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        retryable: res.status >= 500,
+        reason: "provider error",
+      };
+    }
+
     const data = (await res.json()) as Record<string, unknown>;
+    const toField = data.to;
+    const toAddr = Array.isArray(toField)
+      ? String((toField as string[])[0] || "")
+      : String(toField || "");
+
     return {
-      text: data.text ? String(data.text) : undefined,
-      html: data.html ? String(data.html) : undefined,
-      subject: data.subject ? String(data.subject) : undefined,
-      from: data.from ? String(data.from) : undefined,
+      ok: true,
+      text: data.text != null ? String(data.text) : undefined,
+      html: data.html != null ? String(data.html) : undefined,
+      subject: data.subject != null ? String(data.subject) : undefined,
+      from: data.from != null ? String(data.from) : undefined,
+      to: toAddr || undefined,
     };
   } catch {
-    return null;
+    return {
+      ok: false,
+      status: 0,
+      retryable: true,
+      reason: "network error",
+    };
   }
 }
 

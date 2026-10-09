@@ -90,25 +90,52 @@ Tables:
 
 ## Inbound email setup
 
-1. Point your domain’s MX (or provider routing) so messages arrive at your chosen provider.
-2. Configure the provider to send a webhook `POST` to:
+Real email delivery requires a domain, DNS, a supported provider, and a webhook
+pointing at this application. Until those are configured, address generation
+returns a clear configuration error and no mail is accepted.
 
-   ```
-   https://your-app.vercel.app/api/webhook/inbound
-   ```
+### 1. Database
 
-3. Set `INBOUND_PROVIDER` and `INBOUND_WEBHOOK_SECRET` to match the provider’s signature scheme.
-4. Set `EMAIL_DOMAIN` to the domain users will see (must match what the provider delivers to).
+```bash
+# Apply schema (includes inboxes, messages, rate_limit_buckets)
+npm run db:push
+# or: npm run db:generate && npm run db:migrate
+```
 
-### Provider-specific configuration
+### 2. Domain and DNS
 
-| Provider | `INBOUND_PROVIDER` | `INBOUND_WEBHOOK_SECRET` | Extra env | Notes |
-|----------|--------------------|--------------------------|-----------|-------|
-| **Mailgun** | `mailgun` | Webhook Signing Key (Settings → API Security) | — | Verifies `timestamp`+`token` HMAC-SHA256. Supports form fields, nested `signature` object, and headers. 5-minute replay window. |
-| **Resend** | `resend` | Signing secret (`whsec_…`) from webhook details | `RESEND_API_KEY` optional | Full Svix verification (`svix-id`, `svix-timestamp`, `svix-signature`). If the event only includes an email id, set `RESEND_API_KEY` to fetch full content. |
-| **Generic** | `generic` | Shared secret | — | Header `X-Webhook-Signature: sha256=<hex of HMAC-SHA256(body)>`. |
+1. Choose a domain (or subdomain) for temporary addresses, e.g. `mail.example.com`.
+2. Set `EMAIL_DOMAIN=mail.example.com`.
+3. Configure MX (or provider-specific receiving records) so mail for that domain
+   is delivered to your inbound provider (Mailgun Routes, Resend Receiving, etc.).
 
-Unknown recipients are acknowledged with HTTP 200 so providers do not retry indefinitely. Duplicate `externalId` values are ignored (database unique constraint + application check). Soft-deleted inboxes do not receive new messages.
+### 3. Webhook URL
+
+```
+https://<your-app>/api/webhook/inbound
+```
+
+### 4. Provider configuration
+
+| Provider | `INBOUND_PROVIDER` | `INBOUND_WEBHOOK_SECRET` | Extra | Notes |
+|----------|--------------------|--------------------------|-------|-------|
+| **Mailgun** | `mailgun` | Webhook Signing Key (Settings → API Security) | — | Verifies HMAC-SHA256 of `timestamp + token`. Supports JSON `signature` object, form fields `signature[timestamp]` / `signature[token]` / `signature[signature]`, flat form fields, and headers. 5-minute replay window. |
+| **Resend** | `resend` | Signing secret (`whsec_…`) | **`RESEND_API_KEY` required** | Svix signature verification. Webhooks only include metadata; full body is fetched via `GET /emails/receiving/:email_id`. Without the API key, content retrieval fails and the message is not stored as complete. |
+| **Generic** | `generic` | Shared HMAC secret | — | Header `X-Webhook-Signature: sha256=<hex of HMAC-SHA256(raw body)>`. |
+
+### 5. Verify end-to-end delivery
+
+1. Deploy with the env vars above.
+2. Generate an address in the UI.
+3. Send a real email to that address from an external account.
+4. Confirm the message appears in `/inbox/<token>` with correct subject and body.
+
+Until step 4 succeeds, do not claim that inbound delivery is working.
+
+Unknown recipients return HTTP 200 `{ ignored: true }` so providers do not retry
+indefinitely. Duplicate provider message IDs are ignored (unique index + conflict
+handling). Soft-deleted inboxes do not accept new messages.
+
 
 ## Security notes
 

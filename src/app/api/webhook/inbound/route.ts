@@ -4,6 +4,7 @@ import {
   verifyWebhookSignature,
   normalizeInboundPayload,
   fetchResendEmailContent,
+  parseFormBody,
 } from "@/lib/email/provider";
 import { sanitizeHtml, normalizeTextBody } from "@/lib/email/sanitize";
 import { getInboxByAddress, insertMessage } from "@/lib/db/inboxes";
@@ -14,12 +15,8 @@ export const runtime = "nodejs";
  * Inbound email webhook.
  * POST /api/webhook/inbound
  *
- * Env (see .env.example):
- * - DATABASE_URL
- * - EMAIL_DOMAIN
- * - INBOUND_PROVIDER = mailgun | resend | generic
- * - INBOUND_WEBHOOK_SECRET
- * - RESEND_API_KEY (optional; used when Resend payload only has email id)
+ * Env: DATABASE_URL, EMAIL_DOMAIN, INBOUND_PROVIDER, INBOUND_WEBHOOK_SECRET,
+ *      RESEND_API_KEY (required for Resend body retrieval)
  */
 export async function POST(req: NextRequest) {
   try {
@@ -35,16 +32,12 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
       }
     } else if (contentType.includes("application/x-www-form-urlencoded")) {
-      body = Object.fromEntries(new URLSearchParams(rawBody).entries());
+      body = parseFormBody(rawBody);
     } else {
       try {
         body = JSON.parse(rawBody);
       } catch {
-        try {
-          body = Object.fromEntries(new URLSearchParams(rawBody).entries());
-        } catch {
-          return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
-        }
+        body = parseFormBody(rawBody);
       }
     }
 
@@ -57,7 +50,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
     }
 
-    // Resend may send event with only an email id — enrich if possible
+    // Resend webhooks only include metadata — body must be fetched
     if (
       provider === "resend" &&
       normalized.externalId &&
@@ -65,26 +58,43 @@ export async function POST(req: NextRequest) {
       !normalized.htmlBody
     ) {
       const full = await fetchResendEmailContent(normalized.externalId);
-      if (full) {
-        normalized = {
-          ...normalized,
-          textBody: full.text ?? normalized.textBody,
-          htmlBody: full.html ?? normalized.htmlBody,
-          subject: full.subject ?? normalized.subject,
-          from: full.from ?? normalized.from,
-        };
+      if (!full.ok) {
+        // Retryable failures → 503 so the provider can retry
+        if (full.retryable) {
+          return NextResponse.json(
+            { error: "Provider temporarily unavailable" },
+            { status: 503 }
+          );
+        }
+        // Non-retryable (missing key, 404, auth) — acknowledge without saving incomplete body
+        console.error(
+          "[webhook/inbound] Resend content fetch failed:",
+          full.reason
+        );
+        return NextResponse.json(
+          { ok: false, error: "Unable to retrieve email content" },
+          { status: 422 }
+        );
       }
+      normalized = {
+        ...normalized,
+        textBody: full.text ?? normalized.textBody,
+        htmlBody: full.html ?? normalized.htmlBody,
+        subject: full.subject ?? normalized.subject,
+        from: full.from ?? normalized.from,
+        to: full.to && full.to.includes("@") ? full.to : normalized.to,
+      };
     }
 
     const inbox = await getInboxByAddress(normalized.to);
     if (!inbox) {
-      // Acknowledge so providers do not retry forever for unknown recipients
       return NextResponse.json({ ok: true, ignored: true });
     }
 
     const textBody = normalizeTextBody(normalized.textBody);
     const htmlBody = sanitizeHtml(normalized.htmlBody);
 
+    // insertMessage is idempotent on externalId; duplicates return null
     await insertMessage({
       inboxId: inbox.id,
       externalId: normalized.externalId,

@@ -7,6 +7,7 @@ import {
   boolean,
   index,
   uniqueIndex,
+  bigserial,
 } from "drizzle-orm/pg-core";
 
 /**
@@ -17,11 +18,8 @@ export const inboxes = pgTable(
   "inboxes",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    /** Local part of the address, e.g. "user123" */
     localPart: text("local_part").notNull(),
-    /** Full address, e.g. "user123@example.com" */
     address: text("address").notNull(),
-    /** High-entropy access token used in the inbox URL */
     accessToken: text("access_token").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
@@ -52,11 +50,8 @@ export const messages = pgTable(
     fromAddress: text("from_address").notNull(),
     fromName: text("from_name"),
     subject: text("subject").notNull().default("(no subject)"),
-    /** Plain-text body (preferred for previews and OTP extraction) */
     textBody: text("text_body"),
-    /** Sanitized HTML body (scripts stripped) */
     htmlBody: text("html_body"),
-    /** ISO timestamp when the provider received the message */
     receivedAt: timestamp("received_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -73,6 +68,20 @@ export const messages = pgTable(
       .on(table.externalId)
       .where(sql`external_id IS NOT NULL`),
   ]
+);
+
+/**
+ * Rate-limit hit log. Managed via schema / db:push.
+ * Application logic uses advisory locks for atomic check+insert.
+ */
+export const rateLimitBuckets = pgTable(
+  "rate_limit_buckets",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    bucketKey: text("bucket_key").notNull(),
+    hitAt: timestamp("hit_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("rate_limit_buckets_key_hit_idx").on(table.bucketKey, table.hitAt)]
 );
 
 export type Inbox = typeof inboxes.$inferSelect;
