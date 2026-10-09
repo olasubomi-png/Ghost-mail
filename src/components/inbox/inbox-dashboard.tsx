@@ -10,11 +10,8 @@ import {
   Trash2,
   Mail,
   ArrowLeft,
-  ChevronRight,
-  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Logo } from "@/components/ui/logo";
 import { cn, formatRelativeTime, extractVerificationCodes } from "@/lib/utils";
 
 interface MessageSummary {
