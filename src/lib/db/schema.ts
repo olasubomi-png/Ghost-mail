@@ -7,7 +7,7 @@ import {
   boolean,
   index,
   uniqueIndex,
-  bigserial,
+  integer,
 } from "drizzle-orm/pg-core";
 
 /**
@@ -71,18 +71,17 @@ export const messages = pgTable(
 );
 
 /**
- * Rate-limit hit log. Managed via schema / db:push.
- * Application logic uses advisory locks for atomic check+insert.
+ * Per-key rate-limit counter (fixed window).
+ * Primary key on bucket_key enables row-level lock serialization via
+ * INSERT … ON CONFLICT DO UPDATE. Apply with `npm run db:push`.
  */
-export const rateLimitBuckets = pgTable(
-  "rate_limit_buckets",
-  {
-    id: bigserial("id", { mode: "number" }).primaryKey(),
-    bucketKey: text("bucket_key").notNull(),
-    hitAt: timestamp("hit_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (table) => [index("rate_limit_buckets_key_hit_idx").on(table.bucketKey, table.hitAt)]
-);
+export const rateLimitCounters = pgTable("rate_limit_counters", {
+  bucketKey: text("bucket_key").primaryKey(),
+  windowStart: timestamp("window_start", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  hitCount: integer("hit_count").notNull().default(0),
+});
 
 export type Inbox = typeof inboxes.$inferSelect;
 export type NewInbox = typeof inboxes.$inferInsert;

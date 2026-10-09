@@ -97,7 +97,7 @@ returns a clear configuration error and no mail is accepted.
 ### 1. Database
 
 ```bash
-# Apply schema (includes inboxes, messages, rate_limit_buckets)
+# Apply schema (includes inboxes, messages, rate_limit_counters)
 npm run db:push
 # or: npm run db:generate && npm run db:migrate
 ```
@@ -167,3 +167,20 @@ npm run test         # Vitest unit tests
 ## License
 
 Private / proprietary – all rights reserved.
+
+
+## Rate limiting
+
+Address generation is limited per client IP (default 10/minute) using a
+PostgreSQL row-locked counter (`rate_limit_counters`). Concurrent requests for
+the same key are serialized via `INSERT … ON CONFLICT DO UPDATE` on the primary
+key — this is safe under READ COMMITTED and works with Neon's HTTP driver
+(no interactive transactions required).
+
+Opt-in concurrency integration tests:
+
+```bash
+RATE_LIMIT_TEST_DATABASE_URL=postgresql://… npm run test -- tests/rate-limit.integration.test.ts
+```
+
+Use a dedicated test database only — never production credentials.

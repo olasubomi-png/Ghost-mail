@@ -1,12 +1,20 @@
 /**
- * Production-safe rate limiter backed by PostgreSQL (Neon).
+ * Production-safe rate limiter for Neon (drizzle-orm/neon-http).
  *
- * Concurrency: a single SQL statement acquires pg_advisory_xact_lock for the
- * bucket key, then prunes, counts, and conditionally inserts under that lock.
- * The lock CTE is explicitly referenced by every subsequent CTE so PostgreSQL
- * cannot optimize it away (unreferenced SELECT CTEs may be skipped).
+ * ROOT CAUSE OF PRIOR APPROACH:
+ * Under READ COMMITTED, a statement sees a snapshot taken at query start.
+ * Waiting on pg_advisory_xact_lock does not refresh that snapshot, so a
+ * concurrent transaction that inserted hits and committed while we waited
+ * can still be invisible to COUNT — allowing the limit to be exceeded.
+ * neon-http also does not support interactive multi-statement transactions.
  *
- * Fails closed in production when the store is unavailable.
+ * FIX:
+ * One row per key in rate_limit_counters. Atomic
+ *   INSERT … ON CONFLICT DO UPDATE … WHERE … RETURNING
+ * serializes concurrent writers on the same primary key. PostgreSQL re-reads
+ * the locked row version for the UPDATE path, so hit_count stays correct.
+ * This is a fixed 60s window that resets when the window expires (standard
+ * for API rate limits; not a multi-hit sliding log).
  */
 
 import { sql } from "drizzle-orm";
@@ -14,7 +22,7 @@ import { getDb } from "@/lib/db";
 
 const WINDOW_MS = 60_000;
 
-/** In-memory fallback for local dev when DATABASE_URL is missing */
+/** In-memory fallback ONLY when DATABASE_URL is absent (local dev). */
 const memoryStore = new Map<string, number[]>();
 
 function memoryLimit(
@@ -33,7 +41,6 @@ function memoryLimit(
   return { success: true, remaining: limit - entry.length };
 }
 
-/** Exported for unit tests of the pure memory path */
 export function _memoryRateLimitForTests(
   key: string,
   limit: number
@@ -46,57 +53,41 @@ export function _resetMemoryRateLimitForTests() {
 }
 
 /**
- * SQL used for the atomic rate-limit check (exported for review/tests).
- * `locked` MUST be referenced by later CTEs so the advisory lock is taken.
+ * Atomic upsert SQL. Exported for structure tests.
+ * Returns one row with hit_count when allowed; zero rows when denied.
  */
-export function buildRateLimitSql(key: string, limit: number, windowSeconds: number) {
+export function buildRateLimitUpsertSql(
+  key: string,
+  limit: number,
+  windowSeconds: number
+) {
   return sql`
-    WITH locked AS (
-      SELECT pg_advisory_xact_lock(hashtext(${key})) AS acquired
-    ),
-    pruned AS (
-      DELETE FROM rate_limit_buckets
-      WHERE bucket_key = ${key}
-        AND hit_at < NOW() - make_interval(secs => ${windowSeconds})
-        AND (SELECT acquired IS NOT NULL FROM locked)
-      RETURNING 1
-    ),
-    counted AS (
-      SELECT COUNT(*)::int AS cnt
-      FROM rate_limit_buckets, locked
-      WHERE bucket_key = ${key}
-        AND hit_at >= NOW() - make_interval(secs => ${windowSeconds})
-        AND locked.acquired IS NOT NULL
-    ),
-    inserted AS (
-      INSERT INTO rate_limit_buckets (bucket_key, hit_at)
-      SELECT ${key}, NOW()
-      FROM counted, locked
-      WHERE counted.cnt < ${limit}
-        AND locked.acquired IS NOT NULL
-      RETURNING 1
-    )
-    SELECT
-      (SELECT cnt FROM counted) AS prior_count,
-      (SELECT COUNT(*)::int FROM inserted) AS did_insert,
-      (SELECT acquired IS NOT NULL FROM locked) AS lock_held
+    INSERT INTO rate_limit_counters (bucket_key, window_start, hit_count)
+    VALUES (${key}, NOW(), 1)
+    ON CONFLICT (bucket_key) DO UPDATE SET
+      hit_count = CASE
+        WHEN rate_limit_counters.window_start
+          <= NOW() - make_interval(secs => ${windowSeconds})
+        THEN 1
+        ELSE rate_limit_counters.hit_count + 1
+      END,
+      window_start = CASE
+        WHEN rate_limit_counters.window_start
+          <= NOW() - make_interval(secs => ${windowSeconds})
+        THEN NOW()
+        ELSE rate_limit_counters.window_start
+      END
+    WHERE
+      rate_limit_counters.window_start
+        <= NOW() - make_interval(secs => ${windowSeconds})
+      OR rate_limit_counters.hit_count < ${limit}
+    RETURNING hit_count
   `;
 }
 
-function parseRateLimitResult(result: unknown): {
-  prior: number;
-  didInsert: number;
-  lockHeld: boolean;
-} {
-  let prior = 0;
-  let didInsert = 0;
-  let lockHeld = false;
+function parseHitCount(result: unknown): number | null {
+  if (!result || typeof result !== "object") return null;
 
-  if (!result || typeof result !== "object") {
-    return { prior, didInsert, lockHeld };
-  }
-
-  // neon-http / drizzle may return { rows: [...] } or an array of row objects
   const asRows = (result as { rows?: unknown }).rows;
   const row = Array.isArray(asRows)
     ? (asRows[0] as Record<string, unknown> | undefined)
@@ -104,21 +95,17 @@ function parseRateLimitResult(result: unknown): {
       ? (result[0] as Record<string, unknown> | undefined)
       : undefined;
 
-  if (row) {
-    prior = Number(row.prior_count ?? row.priorCount ?? 0);
-    didInsert = Number(row.did_insert ?? row.didInsert ?? 0);
-    const lh = row.lock_held ?? row.lockHeld;
-    lockHeld = lh === true || lh === "t" || lh === 1 || lh === "true";
-  }
+  if (!row) return null;
 
-  return { prior, didInsert, lockHeld };
+  const raw = row.hit_count ?? row.hitCount;
+  if (raw === undefined || raw === null) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
 }
 
 /**
- * Sliding-window rate limit shared across instances via PostgreSQL.
- *
- * Schema (apply once via `npm run db:push` — see README):
- *   rate_limit_buckets (id, bucket_key, hit_at) + index on (bucket_key, hit_at)
+ * Enforce at most `limit` requests per key per WINDOW_MS window.
+ * Default limit: RATE_LIMIT_GENERATE or 10.
  */
 export async function rateLimit(
   key: string,
@@ -133,35 +120,29 @@ export async function rateLimit(
     const windowSeconds = Math.ceil(WINDOW_MS / 1000);
 
     const result = await db.execute(
-      buildRateLimitSql(key, limit, windowSeconds)
+      buildRateLimitUpsertSql(key, limit, windowSeconds)
     );
 
-    const { prior, didInsert, lockHeld } = parseRateLimitResult(result);
+    const hitCount = parseHitCount(result);
 
-    // If the lock path did not run or result is unreadable, fail closed in prod
-    // (dev falls through only when we can interpret a successful insert)
-    if (!lockHeld && didInsert === 0 && prior === 0) {
-      // Ambiguous empty result — could be empty table under lock, or parse failure.
-      // Treat did_insert === 1 as the only allow path.
-    }
-
-    if (didInsert === 1) {
-      return { success: true, remaining: Math.max(0, limit - prior - 1) };
-    }
-
-    // did_insert === 0 means either over limit, or unexpected result shape.
-    // Over-limit is expected; ambiguous parse fails closed only if we cannot
-    // confirm the query shape — prior > 0 implies lock+count ran.
-    if (prior > 0 || lockHeld) {
+    // No RETURNING row → WHERE blocked the update (already at limit)
+    if (hitCount === null) {
       return { success: false, remaining: 0 };
     }
 
-    // Completely unparseable result
-    if (process.env.NODE_ENV === "production") {
-      console.error("[rate-limit] unparseable query result – denying request");
-      return { success: false, remaining: 0 };
+    if (hitCount < 1 || hitCount > limit) {
+      // Unexpected shape — fail closed in production
+      if (process.env.NODE_ENV === "production") {
+        console.error("[rate-limit] unexpected hit_count – denying request");
+        return { success: false, remaining: 0 };
+      }
+      return memoryLimit(key, limit);
     }
-    return memoryLimit(key, limit);
+
+    return {
+      success: true,
+      remaining: Math.max(0, limit - hitCount),
+    };
   } catch (err) {
     if (process.env.NODE_ENV === "production") {
       console.error(
