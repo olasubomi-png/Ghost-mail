@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 48" role="img" aria-label="Ghost Mail">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="40" y2="44" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#A78BFA"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(0,2)">
+    <path fill="url(#g)" d="M22 2C12.6 2 5 9.2 5 18.8V34c0 1.4 1 2.3 2.1 2.3.9 0 1.7-.5 2.4-1.2.7.8 1.6 1.3 2.7 1.3 1 0 1.9-.5 2.6-1.3.7.8 1.6 1.3 2.6 1.3s1.9-.5 2.6-1.3c.7.8 1.6 1.3 2.7 1.3 1 0 1.9-.5 2.6-1.3.7.7 1.5 1.2 2.4 1.2 1.1 0 2.1-.9 2.1-2.3V18.8C38 9.2 30.4 2 22 2z"/>
+    <path fill="#0B0B0F" opacity=".35" d="M13.5 18h17c.8 0 1.5.7 1.5 1.5v7c0 .8-.7 1.5-1.5 1.5h-17c-.8 0-1.5-.7-1.5-1.5v-7c0-.8.7-1.5 1.5-1.5z"/>
+    <path fill="#EDE9FE" d="M13.5 18l8.5 6 8.5-6v1.5l-8.5 6-8.5-6V18z"/>
+    <circle cx="17.2" cy="13.2" r="2.2" fill="#0B0B0F"/>
+    <circle cx="26.8" cy="13.2" r="2.2" fill="#0B0B0F"/>
+    <circle cx="17.9" cy="12.6" r=".75" fill="#F5F3FF"/>
+    <circle cx="27.5" cy="12.6" r=".75" fill="#F5F3FF"/>
+  </g>
+  <text x="52" y="32" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="26" font-weight="650" letter-spacing="-0.02em" fill="#FAFAFA">Ghost<tspan fill="#A78BFA">Mail</tspan></text>
+</svg>

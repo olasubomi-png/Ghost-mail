@@ -28,10 +28,22 @@ export const metadata: Metadata = {
     "ghost mail",
   ],
   authors: [{ name: "Ghost Mail" }],
+  applicationName: APP_NAME,
+  icons: {
+    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+    shortcut: "/favicon.svg",
+    apple: "/ghost-mail-icon.svg",
+  },
   openGraph: {
     title: APP_NAME,
     description: APP_DESCRIPTION,
     type: "website",
+    siteName: APP_NAME,
+  },
+  twitter: {
+    card: "summary",
+    title: APP_NAME,
+    description: APP_DESCRIPTION,
   },
 };
 
