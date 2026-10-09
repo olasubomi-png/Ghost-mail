@@ -8,12 +8,11 @@ export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
-    // Rate limit by IP
     const ip =
       req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
       req.headers.get("x-real-ip") ||
       "unknown";
-    const { success, remaining } = rateLimit(`create:${ip}`);
+    const { success, remaining } = await rateLimit(`create:${ip}`);
     if (!success) {
       return NextResponse.json(
         { error: "Too many requests. Please wait a minute and try again." },
@@ -69,7 +68,10 @@ export async function POST(req: NextRequest) {
         { status }
       );
     }
-    console.error("[api/inbox/create]", err instanceof Error ? err.message : "unknown");
+    console.error(
+      "[api/inbox/create]",
+      err instanceof Error ? err.message : "unknown"
+    );
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

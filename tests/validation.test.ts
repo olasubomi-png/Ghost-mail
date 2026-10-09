@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { localPartSchema, createInboxSchema } from "../src/lib/validation";
-import { generateRandomLocalPart, extractVerificationCodes } from "../src/lib/utils";
+import {
+  generateRandomLocalPart,
+  extractVerificationCodes,
+} from "../src/lib/utils";
+import { sanitizeHtml, normalizeTextBody } from "../src/lib/email/sanitize";
 
 describe("localPartSchema", () => {
   it("accepts valid usernames", () => {
@@ -31,7 +35,9 @@ describe("createInboxSchema", () => {
   });
 
   it("validates optional localPart", () => {
-    expect(createInboxSchema.safeParse({ localPart: "validuser" }).success).toBe(true);
+    expect(createInboxSchema.safeParse({ localPart: "validuser" }).success).toBe(
+      true
+    );
     expect(createInboxSchema.safeParse({ localPart: "x" }).success).toBe(false);
   });
 });
@@ -53,5 +59,31 @@ describe("extractVerificationCodes", () => {
 
   it("returns empty for no codes", () => {
     expect(extractVerificationCodes("Hello world")).toEqual([]);
+  });
+});
+
+describe("sanitizeHtml", () => {
+  it("strips script tags", () => {
+    const dirty = '<p>Hi</p><script>alert(1)</script>';
+    const clean = sanitizeHtml(dirty);
+    expect(clean).not.toContain("script");
+    expect(clean).toContain("Hi");
+  });
+
+  it("strips event handlers", () => {
+    const dirty = '<img src=x onerror="alert(1)">';
+    const clean = sanitizeHtml(dirty) || "";
+    expect(clean.toLowerCase()).not.toContain("onerror");
+  });
+
+  it("returns null for empty", () => {
+    expect(sanitizeHtml(null)).toBeNull();
+    expect(sanitizeHtml(undefined)).toBeNull();
+  });
+});
+
+describe("normalizeTextBody", () => {
+  it("strips null bytes and trims", () => {
+    expect(normalizeTextBody("  hello\0world  ")).toBe("helloworld");
   });
 });

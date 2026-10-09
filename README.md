@@ -100,13 +100,15 @@ Tables:
 3. Set `INBOUND_PROVIDER` and `INBOUND_WEBHOOK_SECRET` to match the provider’s signature scheme.
 4. Set `EMAIL_DOMAIN` to the domain users will see (must match what the provider delivers to).
 
-Supported signature schemes:
+### Provider-specific configuration
 
-- **Mailgun** – `X-Mailgun-Signature` + timestamp/token (replay window 5 min)
-- **Resend** – Svix-style / HMAC body
-- **Generic** – `X-Webhook-Signature: sha256=<hex>`
+| Provider | `INBOUND_PROVIDER` | `INBOUND_WEBHOOK_SECRET` | Extra env | Notes |
+|----------|--------------------|--------------------------|-----------|-------|
+| **Mailgun** | `mailgun` | Webhook Signing Key (Settings → API Security) | — | Verifies `timestamp`+`token` HMAC-SHA256. Supports form fields, nested `signature` object, and headers. 5-minute replay window. |
+| **Resend** | `resend` | Signing secret (`whsec_…`) from webhook details | `RESEND_API_KEY` optional | Full Svix verification (`svix-id`, `svix-timestamp`, `svix-signature`). If the event only includes an email id, set `RESEND_API_KEY` to fetch full content. |
+| **Generic** | `generic` | Shared secret | — | Header `X-Webhook-Signature: sha256=<hex of HMAC-SHA256(body)>`. |
 
-Unknown recipients are acknowledged with 200 so providers do not retry indefinitely. Duplicate `externalId` values are ignored (idempotent).
+Unknown recipients are acknowledged with HTTP 200 so providers do not retry indefinitely. Duplicate `externalId` values are ignored (database unique constraint + application check). Soft-deleted inboxes do not receive new messages.
 
 ## Security notes
 

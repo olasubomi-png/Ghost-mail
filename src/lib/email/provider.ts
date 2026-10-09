@@ -4,18 +4,165 @@ import { inboundMessageSchema } from "@/lib/validation";
 
 export type ProviderName = "mailgun" | "resend" | "generic";
 
+const REPLAY_WINDOW_SECONDS = 300; // 5 minutes
+
+function safeEqualHex(a: string, b: string): boolean {
+  try {
+    const ba = Buffer.from(a, "hex");
+    const bb = Buffer.from(b, "hex");
+    if (ba.length !== bb.length) return false;
+    return timingSafeEqual(ba, bb);
+  } catch {
+    return false;
+  }
+}
+
+function safeEqualUtf8(a: string, b: string): boolean {
+  try {
+    const ba = Buffer.from(a, "utf8");
+    const bb = Buffer.from(b, "utf8");
+    if (ba.length !== bb.length) return false;
+    return timingSafeEqual(ba, bb);
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Verify webhook signature according to the configured provider.
- * Returns true if the request is authentic (or if no secret is configured – for local dev only).
+ * Verify Mailgun signature.
+ * Algorithm: HMAC-SHA256(timestamp + token, signingKey) === signature (hex)
+ * https://documentation.mailgun.com/docs/mailgun/user-manual/webhooks/securing-webhooks
  */
-export function verifyWebhookSignature(
-  provider: ProviderName,
+export function verifyMailgunSignature(
+  signingKey: string,
+  timestamp: string,
+  token: string,
+  signature: string
+): boolean {
+  if (!timestamp || !token || !signature || !signingKey) return false;
+
+  const ts = Number(timestamp);
+  if (Number.isNaN(ts) || Math.abs(Date.now() / 1000 - ts) > REPLAY_WINDOW_SECONDS) {
+    return false;
+  }
+
+  const expected = createHmac("sha256", signingKey)
+    .update(timestamp + token)
+    .digest("hex");
+
+  return safeEqualHex(expected, signature);
+}
+
+/**
+ * Verify Resend / Svix webhook signature.
+ * https://docs.svix.com/receiving/verifying-payloads/how-manual
+ * https://resend.com/docs/webhooks/verify-webhooks-requests
+ */
+export function verifyResendSignature(
+  webhookSecret: string,
   headers: Headers,
   rawBody: string
 ): boolean {
+  const svixId = headers.get("svix-id") || headers.get("webhook-id") || "";
+  const svixTimestamp =
+    headers.get("svix-timestamp") || headers.get("webhook-timestamp") || "";
+  const svixSignature =
+    headers.get("svix-signature") || headers.get("webhook-signature") || "";
+
+  if (!svixId || !svixTimestamp || !svixSignature || !webhookSecret) {
+    return false;
+  }
+
+  const ts = Number(svixTimestamp);
+  if (Number.isNaN(ts) || Math.abs(Date.now() / 1000 - ts) > REPLAY_WINDOW_SECONDS) {
+    return false;
+  }
+
+  let secretBytes: Buffer;
+  try {
+    if (webhookSecret.startsWith("whsec_")) {
+      secretBytes = Buffer.from(webhookSecret.slice("whsec_".length), "base64");
+    } else {
+      secretBytes = Buffer.from(webhookSecret, "base64");
+    }
+  } catch {
+    return false;
+  }
+
+  const signedContent = `${svixId}.${svixTimestamp}.${rawBody}`;
+  const expected = createHmac("sha256", secretBytes)
+    .update(signedContent)
+    .digest("base64");
+
+  const candidates = svixSignature.split(" ").map((s) => s.trim()).filter(Boolean);
+  for (const candidate of candidates) {
+    const parts = candidate.split(",");
+    const version = parts[0];
+    const sig = parts.slice(1).join(",");
+    if (version !== "v1" || !sig) continue;
+    if (safeEqualUtf8(expected, sig)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Generic HMAC-SHA256 of raw body. Header: X-Webhook-Signature: sha256=<hex>
+ */
+export function verifyGenericSignature(
+  secret: string,
+  rawBody: string,
+  signatureHeader: string
+): boolean {
+  const match = signatureHeader.match(/^sha256=(.+)$/i);
+  if (!match) return false;
+  const expected = createHmac("sha256", secret).update(rawBody).digest("hex");
+  return safeEqualHex(expected, match[1]);
+}
+
+export function extractMailgunAuth(
+  headers: Headers,
+  body: unknown
+): { timestamp: string; token: string; signature: string } | null {
+  if (body && typeof body === "object") {
+    const b = body as Record<string, unknown>;
+    const sigObj = b.signature;
+    if (sigObj && typeof sigObj === "object") {
+      const s = sigObj as Record<string, unknown>;
+      const timestamp = String(s.timestamp ?? "");
+      const token = String(s.token ?? "");
+      const signature = String(s.signature ?? "");
+      if (timestamp && token && signature) {
+        return { timestamp, token, signature };
+      }
+    }
+    if (b.timestamp && b.token && b.signature) {
+      return {
+        timestamp: String(b.timestamp),
+        token: String(b.token),
+        signature: String(b.signature),
+      };
+    }
+  }
+
+  const timestamp = headers.get("x-mailgun-timestamp") || "";
+  const signature = headers.get("x-mailgun-signature") || "";
+  const token = headers.get("x-mailgun-token") || "";
+  if (timestamp && token && signature) {
+    return { timestamp, token, signature };
+  }
+  return null;
+}
+
+export function verifyWebhookSignature(
+  provider: ProviderName,
+  headers: Headers,
+  rawBody: string,
+  parsedBody?: unknown
+): boolean {
   const secret = process.env.INBOUND_WEBHOOK_SECRET;
   if (!secret) {
-    // No secret configured – allow only in development
     if (process.env.NODE_ENV === "production") {
       console.warn("[webhook] INBOUND_WEBHOOK_SECRET not set in production – rejecting");
       return false;
@@ -25,65 +172,37 @@ export function verifyWebhookSignature(
 
   switch (provider) {
     case "mailgun": {
-      // Mailgun: signature = HMAC-SHA256(timestamp + token, apiKey)
-      const timestamp = headers.get("x-mailgun-timestamp") || "";
-      const token = headers.get("x-mailgun-token") || "";
-      const signature = headers.get("x-mailgun-signature") || "";
-      if (!timestamp || !token || !signature) return false;
-      // Replay protection: reject timestamps older than 5 minutes
-      const ts = Number(timestamp);
-      if (Number.isNaN(ts) || Math.abs(Date.now() / 1000 - ts) > 300) return false;
-      const encoded = createHmac("sha256", secret)
-        .update(timestamp + token)
-        .digest("hex");
-      try {
-        return timingSafeEqual(
-          Buffer.from(encoded, "hex"),
-          Buffer.from(signature, "hex")
-        );
-      } catch {
-        return false;
+      let body: unknown = parsedBody;
+      if (body === undefined) {
+        try {
+          body = JSON.parse(rawBody);
+        } catch {
+          try {
+            body = Object.fromEntries(new URLSearchParams(rawBody).entries());
+          } catch {
+            body = undefined;
+          }
+        }
       }
+      const auth = extractMailgunAuth(headers, body);
+      if (!auth) return false;
+      return verifyMailgunSignature(
+        secret,
+        auth.timestamp,
+        auth.token,
+        auth.signature
+      );
     }
-    case "resend": {
-      // Resend uses svix-style headers (or custom). Adapt as needed.
-      const signature = headers.get("svix-signature") || headers.get("resend-signature") || "";
-      if (!signature) return false;
-      // Simplified: HMAC of body
-      const expected = createHmac("sha256", secret).update(rawBody).digest("hex");
-      const provided = signature.replace(/^v1,/, "").trim();
-      try {
-        return timingSafeEqual(
-          Buffer.from(expected),
-          Buffer.from(provided)
-        );
-      } catch {
-        return false;
-      }
-    }
+    case "resend":
+      return verifyResendSignature(secret, headers, rawBody);
     case "generic":
     default: {
-      // Generic: X-Webhook-Signature: sha256=<hex>
       const header = headers.get("x-webhook-signature") || "";
-      const match = header.match(/^sha256=(.+)$/i);
-      if (!match) return false;
-      const expected = createHmac("sha256", secret).update(rawBody).digest("hex");
-      try {
-        return timingSafeEqual(
-          Buffer.from(expected),
-          Buffer.from(match[1])
-        );
-      } catch {
-        return false;
-      }
+      return verifyGenericSignature(secret, rawBody, header);
     }
   }
 }
 
-/**
- * Normalize a raw provider payload into a validated InboundMessage.
- * Returns null if the payload cannot be understood.
- */
 export function normalizeInboundPayload(
   provider: ProviderName,
   body: unknown
@@ -93,30 +212,50 @@ export function normalizeInboundPayload(
 
     if (provider === "mailgun" && typeof body === "object" && body !== null) {
       const b = body as Record<string, unknown>;
-      // Mailgun form-encoded or JSON
+      const toRaw =
+        b.recipient ||
+        b.To ||
+        b.to ||
+        (Array.isArray(b.To) ? (b.To as string[])[0] : undefined);
+      const fromRaw = b.sender || b.From || b.from || "";
+      const fromStr = String(fromRaw);
+      const nameMatch = fromStr.match(/^"?([^"<]+)"?\s*</);
       candidate = {
-        externalId: b["Message-Id"] || b["message-id"] || b.id,
-        to: Array.isArray(b.To) ? (b.To as string[])[0] : b.recipient || b.To,
-        from: b.sender || b.From || b.from,
-        fromName: b["from"] ? String(b.from).replace(/<.*>/, "").trim() : undefined,
+        externalId:
+          b["Message-Id"] ||
+          b["message-id"] ||
+          b["Message-ID"] ||
+          b.id ||
+          undefined,
+        to: toRaw,
+        from: fromStr.includes("<")
+          ? fromStr.replace(/^.*<([^>]+)>.*$/, "$1").trim()
+          : fromStr.trim(),
+        fromName: nameMatch ? nameMatch[1].trim() : undefined,
         subject: b.subject || b.Subject || "(no subject)",
-        textBody: b["body-plain"] || b.text || b["stripped-text"],
-        htmlBody: b["body-html"] || b.html || b["stripped-html"],
-        receivedAt: b.timestamp ? new Date(Number(b.timestamp) * 1000) : undefined,
+        textBody: b["body-plain"] || b["stripped-text"] || b.text || undefined,
+        htmlBody: b["body-html"] || b["stripped-html"] || b.html || undefined,
+        receivedAt: b.timestamp
+          ? new Date(Number(b.timestamp) * 1000)
+          : undefined,
       };
     } else if (provider === "resend" && typeof body === "object" && body !== null) {
       const b = body as Record<string, unknown>;
       const data = (b.data as Record<string, unknown>) || b;
+      const toField = data.to;
+      const toAddr = Array.isArray(toField)
+        ? String((toField as string[])[0] || "")
+        : String(toField || "");
       candidate = {
-        externalId: data.email_id || data.id,
-        to: Array.isArray(data.to) ? (data.to as string[])[0] : data.to,
+        externalId: data.email_id || data.id || b.id,
+        to: toAddr,
         from: data.from,
         subject: data.subject || "(no subject)",
         textBody: data.text,
         htmlBody: data.html,
+        receivedAt: data.created_at ? new Date(String(data.created_at)) : undefined,
       };
     } else if (typeof body === "object" && body !== null) {
-      // Generic JSON shape
       const b = body as Record<string, unknown>;
       candidate = {
         externalId: b.externalId || b.id || b.messageId,
@@ -130,10 +269,14 @@ export function normalizeInboundPayload(
       };
     }
 
-    // Coerce string values
     const parsed = inboundMessageSchema.safeParse({
-      externalId: candidate.externalId ? String(candidate.externalId) : undefined,
-      to: String(candidate.to || "").toLowerCase().trim(),
+      externalId: candidate.externalId
+        ? String(candidate.externalId)
+        : undefined,
+      to: String(candidate.to || "")
+        .toLowerCase()
+        .trim()
+        .replace(/^.*<([^>]+)>.*$/, "$1"),
       from: String(candidate.from || "").trim(),
       fromName: candidate.fromName ? String(candidate.fromName) : undefined,
       subject: String(candidate.subject || "(no subject)"),
@@ -143,7 +286,38 @@ export function normalizeInboundPayload(
     });
 
     if (!parsed.success) return null;
+    if (!parsed.data.to || !parsed.data.to.includes("@")) return null;
     return parsed.data;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Optionally fetch full message from Resend when webhook only has an ID.
+ * Requires RESEND_API_KEY. Never logs the key or full response.
+ */
+export async function fetchResendEmailContent(
+  emailId: string
+): Promise<{ text?: string; html?: string; subject?: string; from?: string } | null> {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey || !emailId) return null;
+
+  try {
+    const res = await fetch(`https://api.resend.com/emails/${emailId}`, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as Record<string, unknown>;
+    return {
+      text: data.text ? String(data.text) : undefined,
+      html: data.html ? String(data.html) : undefined,
+      subject: data.subject ? String(data.subject) : undefined,
+      from: data.from ? String(data.from) : undefined,
+    };
   } catch {
     return null;
   }

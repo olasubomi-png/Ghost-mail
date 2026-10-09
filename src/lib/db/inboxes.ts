@@ -9,11 +9,27 @@ import { localPartSchema } from "@/lib/validation";
 export class InboxError extends Error {
   constructor(
     message: string,
-    public code: "DOMAIN_NOT_CONFIGURED" | "USERNAME_TAKEN" | "INVALID_USERNAME" | "NOT_FOUND" | "RATE_LIMITED"
+    public code:
+      | "DOMAIN_NOT_CONFIGURED"
+      | "USERNAME_TAKEN"
+      | "INVALID_USERNAME"
+      | "NOT_FOUND"
+      | "RATE_LIMITED"
   ) {
     super(message);
     this.name = "InboxError";
   }
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { code?: string; message?: string; cause?: { code?: string } };
+  return (
+    e.code === "23505" ||
+    e.cause?.code === "23505" ||
+    (typeof e.message === "string" &&
+      (e.message.includes("unique") || e.message.includes("duplicate")))
+  );
 }
 
 export async function createInbox(opts: {
@@ -43,10 +59,9 @@ export async function createInbox(opts: {
 
   const address = `${local}@${domain}`;
   const accessToken = nanoid(32);
-
   const db = getDb();
 
-  // Check for existing active inbox with same address
+  // Pre-check for clearer UX (not a security boundary — insert is the source of truth)
   const existing = await db
     .select({ id: inboxes.id })
     .from(inboxes)
@@ -60,19 +75,30 @@ export async function createInbox(opts: {
     );
   }
 
-  const [row] = await db
-    .insert(inboxes)
-    .values({
-      localPart: local,
-      address,
-      accessToken,
-    })
-    .returning();
-
-  return row;
+  try {
+    const [row] = await db
+      .insert(inboxes)
+      .values({
+        localPart: local,
+        address,
+        accessToken,
+      })
+      .returning();
+    return row;
+  } catch (err) {
+    // Concurrent create of the same address — unique index / race
+    if (isUniqueViolation(err)) {
+      throw new InboxError(
+        "That username is already taken. Please choose another.",
+        "USERNAME_TAKEN"
+      );
+    }
+    throw err;
+  }
 }
 
 export async function getInboxByToken(token: string): Promise<Inbox | null> {
+  if (!token || token.length < 16) return null;
   const db = getDb();
   const [row] = await db
     .select()
@@ -171,6 +197,11 @@ export async function softDeleteMessage(
   return result.length > 0;
 }
 
+/**
+ * Insert a message with idempotency on externalId.
+ * Concurrent duplicate deliveries are absorbed via unique constraint.
+ * Returns the inserted row, or null if this was a duplicate.
+ */
 export async function insertMessage(data: {
   inboxId: string;
   externalId?: string | null;
@@ -183,7 +214,6 @@ export async function insertMessage(data: {
 }): Promise<Message | null> {
   const db = getDb();
 
-  // Idempotency: skip if externalId already exists
   if (data.externalId) {
     const existing = await db
       .select({ id: messages.id })
@@ -193,25 +223,32 @@ export async function insertMessage(data: {
     if (existing.length > 0) return null;
   }
 
-  const [row] = await db
-    .insert(messages)
-    .values({
-      inboxId: data.inboxId,
-      externalId: data.externalId ?? null,
-      fromAddress: data.fromAddress,
-      fromName: data.fromName ?? null,
-      subject: data.subject,
-      textBody: data.textBody ?? null,
-      htmlBody: data.htmlBody ?? null,
-      receivedAt: data.receivedAt ?? new Date(),
-    })
-    .returning();
+  try {
+    const [row] = await db
+      .insert(messages)
+      .values({
+        inboxId: data.inboxId,
+        externalId: data.externalId ?? null,
+        fromAddress: data.fromAddress,
+        fromName: data.fromName ?? null,
+        subject: data.subject,
+        textBody: data.textBody ?? null,
+        htmlBody: data.htmlBody ?? null,
+        receivedAt: data.receivedAt ?? new Date(),
+      })
+      .returning();
 
-  // Touch inbox updatedAt
-  await db
-    .update(inboxes)
-    .set({ updatedAt: new Date() })
-    .where(eq(inboxes.id, data.inboxId));
+    await db
+      .update(inboxes)
+      .set({ updatedAt: new Date() })
+      .where(eq(inboxes.id, data.inboxId));
 
-  return row;
+    return row;
+  } catch (err) {
+    // Concurrent duplicate externalId
+    if (data.externalId && isUniqueViolation(err)) {
+      return null;
+    }
+    throw err;
+  }
 }
