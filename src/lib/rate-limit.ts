@@ -1,20 +1,9 @@
 /**
  * Production-safe rate limiter for Neon (drizzle-orm/neon-http).
  *
- * ROOT CAUSE OF PRIOR APPROACH:
- * Under READ COMMITTED, a statement sees a snapshot taken at query start.
- * Waiting on pg_advisory_xact_lock does not refresh that snapshot, so a
- * concurrent transaction that inserted hits and committed while we waited
- * can still be invisible to COUNT — allowing the limit to be exceeded.
- * neon-http also does not support interactive multi-statement transactions.
- *
- * FIX:
- * One row per key in rate_limit_counters. Atomic
- *   INSERT … ON CONFLICT DO UPDATE … WHERE … RETURNING
- * serializes concurrent writers on the same primary key. PostgreSQL re-reads
- * the locked row version for the UPDATE path, so hit_count stays correct.
- * This is a fixed 60s window that resets when the window expires (standard
- * for API rate limits; not a multi-hit sliding log).
+ * Uses rate_limit_counters with INSERT … ON CONFLICT DO UPDATE so concurrent
+ * writers serialize on the primary key under READ COMMITTED (compatible with
+ * neon-http; no interactive transactions required).
  */
 
 import { sql } from "drizzle-orm";
@@ -22,16 +11,17 @@ import { getDb } from "@/lib/db";
 
 const WINDOW_MS = 60_000;
 
-/** In-memory fallback ONLY when DATABASE_URL is absent (local dev). */
+/** In-memory fallback ONLY for non-production when DATABASE_URL is absent. */
 const memoryStore = new Map<string, number[]>();
 
 function memoryLimit(
   key: string,
-  limit: number
+  limit: number,
+  windowMs: number = WINDOW_MS
 ): { success: boolean; remaining: number } {
   const now = Date.now();
   let entry = memoryStore.get(key) ?? [];
-  entry = entry.filter((t) => now - t < WINDOW_MS);
+  entry = entry.filter((t) => now - t < windowMs);
   if (entry.length >= limit) {
     memoryStore.set(key, entry);
     return { success: false, remaining: 0 };
@@ -53,7 +43,7 @@ export function _resetMemoryRateLimitForTests() {
 }
 
 /**
- * Atomic upsert SQL. Exported for structure tests.
+ * Atomic upsert SQL. Exported for structure tests and shared with integration.
  * Returns one row with hit_count when allowed; zero rows when denied.
  */
 export function buildRateLimitUpsertSql(
@@ -85,8 +75,14 @@ export function buildRateLimitUpsertSql(
   `;
 }
 
-function parseHitCount(result: unknown): number | null {
-  if (!result || typeof result !== "object") return null;
+/** Parse Neon/drizzle execute result → hit_count or null if denied / unreadable. */
+export function parseRateLimitHitCount(result: unknown): number | null {
+  if (result == null) return null;
+
+  // Empty array = no RETURNING row (denied)
+  if (Array.isArray(result) && result.length === 0) return null;
+
+  if (typeof result !== "object") return null;
 
   const asRows = (result as { rows?: unknown }).rows;
   const row = Array.isArray(asRows)
@@ -103,40 +99,64 @@ function parseHitCount(result: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+export type RateLimitExecute = (
+  query: ReturnType<typeof buildRateLimitUpsertSql>
+) => Promise<unknown>;
+
+export type RateLimitOptions = {
+  /** Override window length (ms). Production uses 60_000. */
+  windowMs?: number;
+  /** Inject execute for tests; production uses getDb().execute. */
+  execute?: RateLimitExecute;
+};
+
 /**
- * Enforce at most `limit` requests per key per WINDOW_MS window.
+ * Enforce at most `limit` requests per key per window.
  * Default limit: RATE_LIMIT_GENERATE or 10.
  */
 export async function rateLimit(
   key: string,
-  limit: number = Number(process.env.RATE_LIMIT_GENERATE) || 10
+  limit: number = Number(process.env.RATE_LIMIT_GENERATE) || 10,
+  options: RateLimitOptions = {}
 ): Promise<{ success: boolean; remaining: number }> {
+  const isProduction = process.env.NODE_ENV === "production";
+  const windowMs = options.windowMs ?? WINDOW_MS;
+  const windowSeconds = Math.ceil(windowMs / 1000);
+
   if (!process.env.DATABASE_URL) {
-    return memoryLimit(key, limit);
+    // Never use in-memory limiting in production
+    if (isProduction) {
+      console.error("[rate-limit] DATABASE_URL missing in production – denying");
+      return { success: false, remaining: 0 };
+    }
+    return memoryLimit(key, limit, windowMs);
   }
 
   try {
-    const db = getDb();
-    const windowSeconds = Math.ceil(WINDOW_MS / 1000);
+    const execute: RateLimitExecute =
+      options.execute ??
+      (async (query) => {
+        const db = getDb();
+        return db.execute(query);
+      });
 
-    const result = await db.execute(
+    const result = await execute(
       buildRateLimitUpsertSql(key, limit, windowSeconds)
     );
 
-    const hitCount = parseHitCount(result);
+    const hitCount = parseRateLimitHitCount(result);
 
-    // No RETURNING row → WHERE blocked the update (already at limit)
+    // No RETURNING row → at limit (or empty result)
     if (hitCount === null) {
       return { success: false, remaining: 0 };
     }
 
     if (hitCount < 1 || hitCount > limit) {
-      // Unexpected shape — fail closed in production
-      if (process.env.NODE_ENV === "production") {
+      // Malformed / unexpected — always fail closed (no memory fallback in prod path)
+      if (isProduction) {
         console.error("[rate-limit] unexpected hit_count – denying request");
-        return { success: false, remaining: 0 };
       }
-      return memoryLimit(key, limit);
+      return { success: false, remaining: 0 };
     }
 
     return {
@@ -144,13 +164,14 @@ export async function rateLimit(
       remaining: Math.max(0, limit - hitCount),
     };
   } catch (err) {
-    if (process.env.NODE_ENV === "production") {
+    if (isProduction) {
       console.error(
         "[rate-limit] storage error – denying request",
         err instanceof Error ? err.message : "unknown"
       );
       return { success: false, remaining: 0 };
     }
-    return memoryLimit(key, limit);
+    // Dev only: soft-fallback when DB is misconfigured
+    return memoryLimit(key, limit, windowMs);
   }
 }

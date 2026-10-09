@@ -28,3 +28,9 @@ export function getDb() {
 
 export type Database = ReturnType<typeof getDb>;
 export { schema };
+
+/** Clear cached client so tests can point at a different DATABASE_URL. */
+export function resetDbForTests() {
+  _db = null;
+}
+

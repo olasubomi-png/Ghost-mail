@@ -184,3 +184,16 @@ RATE_LIMIT_TEST_DATABASE_URL=postgresql://… npm run test -- tests/rate-limit.i
 ```
 
 Use a dedicated test database only — never production credentials.
+
+### Applying the rate-limit schema to an existing database
+
+```sql
+CREATE TABLE IF NOT EXISTS rate_limit_counters (
+  bucket_key TEXT PRIMARY KEY,
+  window_start TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  hit_count INTEGER NOT NULL DEFAULT 0
+);
+```
+
+Or: `npm run db:push` against a non-production branch. Do not reset production data.
+The previous `rate_limit_buckets` table is unused and may be dropped manually if present.
