@@ -59,14 +59,12 @@ export async function POST(req: NextRequest) {
     ) {
       const full = await fetchResendEmailContent(normalized.externalId);
       if (!full.ok) {
-        // Retryable failures → 503 so the provider can retry
         if (full.retryable) {
           return NextResponse.json(
             { error: "Provider temporarily unavailable" },
             { status: 503 }
           );
         }
-        // Non-retryable (missing key, 404, auth) — acknowledge without saving incomplete body
         console.error(
           "[webhook/inbound] Resend content fetch failed:",
           full.reason
@@ -91,8 +89,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, ignored: true });
     }
 
+    // Plain text always preferred path; HTML sanitization failures must not
+    // drop an otherwise valid message.
     const textBody = normalizeTextBody(normalized.textBody);
-    const htmlBody = sanitizeHtml(normalized.htmlBody);
+    let htmlBody: string | null = null;
+    try {
+      htmlBody = sanitizeHtml(normalized.htmlBody);
+    } catch (err) {
+      console.error(
+        "[webhook/inbound] HTML sanitization failed – saving text only",
+        err instanceof Error ? err.message : "unknown"
+      );
+      htmlBody = null;
+    }
 
     // insertMessage is idempotent on externalId; duplicates return null
     await insertMessage({

@@ -64,21 +64,39 @@ describe("extractVerificationCodes", () => {
 
 describe("sanitizeHtml", () => {
   it("strips script tags", () => {
-    const dirty = '<p>Hi</p><script>alert(1)</script>';
+    const dirty = "<p>Hi</p><script>alert(1)</script>";
     const clean = sanitizeHtml(dirty);
-    expect(clean).not.toContain("script");
+    expect(clean).not.toMatch(/script/i);
     expect(clean).toContain("Hi");
   });
 
   it("strips event handlers", () => {
-    const dirty = '<img src=x onerror="alert(1)">';
+    const dirty = '<img src="https://example.com/x.png" onerror="alert(1)">';
     const clean = sanitizeHtml(dirty) || "";
     expect(clean.toLowerCase()).not.toContain("onerror");
+  });
+
+  it("strips javascript: URLs", () => {
+    const dirty = '<a href="javascript:alert(1)">click</a>';
+    const clean = sanitizeHtml(dirty) || "";
+    expect(clean.toLowerCase()).not.toContain("javascript:");
+  });
+
+  it("preserves safe formatting", () => {
+    const dirty = "<p><strong>Hello</strong> <em>world</em></p>";
+    const clean = sanitizeHtml(dirty) || "";
+    expect(clean).toContain("strong");
+    expect(clean).toContain("Hello");
   });
 
   it("returns null for empty", () => {
     expect(sanitizeHtml(null)).toBeNull();
     expect(sanitizeHtml(undefined)).toBeNull();
+    expect(sanitizeHtml("")).toBeNull();
+  });
+
+  it("does not throw on malformed input", () => {
+    expect(() => sanitizeHtml("<div><unclosed")).not.toThrow();
   });
 });
 
