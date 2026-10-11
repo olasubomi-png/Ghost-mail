@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getConfiguredProvider,
-  verifyWebhookSignature,
+  verifyWebhookSignatureDetailed,
+  describeWebhookAuthContext,
   normalizeInboundPayload,
   fetchResendEmailContent,
   parseFormBody,
@@ -41,7 +42,36 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!verifyWebhookSignature(provider, req.headers, rawBody, body)) {
+    // Safe auth diagnostics (no secrets, signatures, or email bodies)
+    const authContext = describeWebhookAuthContext(provider, req.headers);
+
+    // Timestamp age when present (replay diagnostics only)
+    const tsHeader =
+      req.headers.get("svix-timestamp") ||
+      req.headers.get("webhook-timestamp") ||
+      "";
+    let timestampAgeSeconds: number | null = null;
+    if (tsHeader) {
+      const ts = Number(tsHeader);
+      if (!Number.isNaN(ts)) {
+        timestampAgeSeconds = Math.round(Math.abs(Date.now() / 1000 - ts));
+      }
+    }
+
+    const verification = verifyWebhookSignatureDetailed(
+      provider,
+      req.headers,
+      rawBody,
+      body
+    );
+
+    if (!verification.ok) {
+      console.warn("[webhook/inbound] signature verification failed", {
+        ...authContext,
+        failure_reason: verification.reason ?? "unknown",
+        timestamp_age_seconds: timestampAgeSeconds,
+        body_byte_length: Buffer.byteLength(rawBody, "utf8"),
+      });
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -89,8 +119,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, ignored: true });
     }
 
-    // Plain text always preferred path; HTML sanitization failures must not
-    // drop an otherwise valid message.
     const textBody = normalizeTextBody(normalized.textBody);
     let htmlBody: string | null = null;
     try {

@@ -3,6 +3,10 @@ import { createHmac } from "crypto";
 import {
   verifyMailgunSignature,
   verifyResendSignature,
+  verifyResendSignatureDetailed,
+  decodeSvixSecret,
+  describeWebhookAuthContext,
+  verifyWebhookSignatureDetailed,
   verifyGenericSignature,
   verifyWebhookSignature,
   normalizeInboundPayload,
@@ -285,5 +289,99 @@ describe("memory rate limit", () => {
     expect(r1.remaining).toBe(4);
     const r2 = _memoryRateLimitForTests(key, 5);
     expect(r2.remaining).toBe(3);
+  });
+});
+
+
+describe("verifyResendSignatureDetailed failure reasons", () => {
+  const secret = "whsec_" + Buffer.from("test-resend-secret-key!!").toString("base64");
+  const id = "msg_test123";
+  const body = JSON.stringify({ type: "email.received", data: { email_id: "e1" } });
+
+  function sign(timestamp: string) {
+    const { createHmac } = require("crypto");
+    const key = Buffer.from(secret.slice("whsec_".length), "base64");
+    return createHmac("sha256", key)
+      .update(`${id}.${timestamp}.${body}`, "utf8")
+      .digest("base64");
+  }
+
+  it("reports missing headers", () => {
+    const r = verifyResendSignatureDetailed(secret, new Headers(), body);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe("missing_svix_id");
+  });
+
+  it("reports expired timestamp", () => {
+    const old = String(Math.floor(Date.now() / 1000) - 600);
+    const headers = new Headers({
+      "svix-id": id,
+      "svix-timestamp": old,
+      "svix-signature": `v1,${sign(old)}`,
+    });
+    const r = verifyResendSignatureDetailed(secret, headers, body);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe("timestamp_outside_replay_window");
+  });
+
+  it("accepts valid signature with whitespace-padded secret", () => {
+    const ts = String(Math.floor(Date.now() / 1000));
+    const headers = new Headers({
+      "svix-id": id,
+      "svix-timestamp": ts,
+      "svix-signature": `v1,${sign(ts)}`,
+    });
+    expect(verifyResendSignatureDetailed(`  ${secret}  `, headers, body).ok).toBe(true);
+  });
+
+  it("accepts webhook-* header aliases", () => {
+    const ts = String(Math.floor(Date.now() / 1000));
+    const headers = new Headers({
+      "webhook-id": id,
+      "webhook-timestamp": ts,
+      "webhook-signature": `v1,${sign(ts)}`,
+    });
+    expect(verifyResendSignatureDetailed(secret, headers, body).ok).toBe(true);
+  });
+
+  it("decodeSvixSecret trims quotes and whitespace", () => {
+    expect(decodeSvixSecret(` "${secret}" `)).not.toBeNull();
+  });
+});
+
+describe("describeWebhookAuthContext", () => {
+  it("never includes secret material", () => {
+    process.env.INBOUND_WEBHOOK_SECRET = "whsec_abc123";
+    const ctx = describeWebhookAuthContext(
+      "resend",
+      new Headers({ "svix-id": "x", "content-type": "application/json" })
+    );
+    const json = JSON.stringify(ctx);
+    expect(json).not.toContain("whsec_abc123");
+    expect(ctx.has_inbound_webhook_secret).toBe(true);
+    expect(ctx.secret_has_whsec_prefix).toBe(true);
+    expect(ctx.has_svix_id).toBe(true);
+    expect(ctx.has_svix_signature).toBe(false);
+  });
+});
+
+describe("verifyWebhookSignatureDetailed provider mismatch", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(process.env, "INBOUND_WEBHOOK_SECRET");
+  });
+
+  it("fails generic verification when only Svix headers are present", () => {
+    process.env.INBOUND_WEBHOOK_SECRET = "whsec_" + Buffer.from("k").toString("base64");
+    const r = verifyWebhookSignatureDetailed(
+      "generic",
+      new Headers({
+        "svix-id": "msg_1",
+        "svix-timestamp": String(Math.floor(Date.now() / 1000)),
+        "svix-signature": "v1,abc",
+      }),
+      "{}"
+    );
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe("missing_generic_signature_header");
   });
 });

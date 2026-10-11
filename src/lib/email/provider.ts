@@ -80,57 +80,146 @@ export function verifyMailgunSignature(
   return safeEqualHex(expected, signature);
 }
 
+export type ResendVerifyResult = {
+  ok: boolean;
+  /** Machine-safe reason for logs – never includes secrets or signatures */
+  reason?: string;
+};
+
+/**
+ * Decode a Svix/Resend signing secret (whsec_ + base64 key material).
+ * Trims whitespace that often appears when pasting into Vercel env UI.
+ */
+export function decodeSvixSecret(webhookSecret: string): Buffer | null {
+  const trimmed = webhookSecret.trim().replace(/^["']|["']$/g, "");
+  if (!trimmed) return null;
+  try {
+    const b64 = trimmed.startsWith("whsec_")
+      ? trimmed.slice("whsec_".length)
+      : trimmed;
+    const bytes = Buffer.from(b64, "base64");
+    // Empty or clearly invalid decode
+    if (bytes.length === 0) return null;
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Verify Resend / Svix webhook signature.
+ * Spec: HMAC-SHA256 over `${svix-id}.${svix-timestamp}.${rawBody}` with
+ * base64-decoded key material from the whsec_ secret; compare to each
+ * `v1,<sig>` entry in the space-delimited signature header.
  * https://docs.svix.com/receiving/verifying-payloads/how-manual
+ * https://resend.com/docs/webhooks/verify-webhooks-requests
  */
+export function verifyResendSignatureDetailed(
+  webhookSecret: string,
+  headers: Headers,
+  rawBody: string
+): ResendVerifyResult {
+  const svixId =
+    headers.get("svix-id") ||
+    headers.get("webhook-id") ||
+    "";
+  const svixTimestamp =
+    headers.get("svix-timestamp") ||
+    headers.get("webhook-timestamp") ||
+    "";
+  const svixSignature =
+    headers.get("svix-signature") ||
+    headers.get("webhook-signature") ||
+    "";
+
+  if (!webhookSecret || !webhookSecret.trim()) {
+    return { ok: false, reason: "missing_secret" };
+  }
+  if (!svixId) return { ok: false, reason: "missing_svix_id" };
+  if (!svixTimestamp) return { ok: false, reason: "missing_svix_timestamp" };
+  if (!svixSignature) return { ok: false, reason: "missing_svix_signature" };
+
+  const ts = Number(svixTimestamp);
+  if (Number.isNaN(ts)) {
+    return { ok: false, reason: "invalid_timestamp" };
+  }
+  const age = Math.abs(Date.now() / 1000 - ts);
+  if (age > REPLAY_WINDOW_SECONDS) {
+    return { ok: false, reason: "timestamp_outside_replay_window" };
+  }
+
+  const secretBytes = decodeSvixSecret(webhookSecret);
+  if (!secretBytes) {
+    return { ok: false, reason: "secret_decode_failed" };
+  }
+
+  const signedContent = `${svixId}.${svixTimestamp}.${rawBody}`;
+  const expected = createHmac("sha256", secretBytes)
+    .update(signedContent, "utf8")
+    .digest("base64");
+
+  const candidates = svixSignature
+    .split(/[\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  let sawV1 = false;
+  for (const candidate of candidates) {
+    // Format: v1,<base64>  (sig itself may contain padding '=')
+    const comma = candidate.indexOf(",");
+    if (comma === -1) continue;
+    const version = candidate.slice(0, comma);
+    const sig = candidate.slice(comma + 1);
+    if (version !== "v1" || !sig) continue;
+    sawV1 = true;
+    if (safeEqualUtf8(expected, sig)) {
+      return { ok: true };
+    }
+  }
+
+  if (!sawV1) return { ok: false, reason: "no_v1_signature_entry" };
+  return { ok: false, reason: "signature_mismatch" };
+}
+
+/** Boolean wrapper for existing call sites and tests */
 export function verifyResendSignature(
   webhookSecret: string,
   headers: Headers,
   rawBody: string
 ): boolean {
-  const svixId = headers.get("svix-id") || headers.get("webhook-id") || "";
-  const svixTimestamp =
-    headers.get("svix-timestamp") || headers.get("webhook-timestamp") || "";
-  const svixSignature =
-    headers.get("svix-signature") || headers.get("webhook-signature") || "";
+  return verifyResendSignatureDetailed(webhookSecret, headers, rawBody).ok;
+}
 
-  if (!svixId || !svixTimestamp || !svixSignature || !webhookSecret) {
-    return false;
-  }
-
-  const ts = Number(svixTimestamp);
-  if (Number.isNaN(ts) || Math.abs(Date.now() / 1000 - ts) > REPLAY_WINDOW_SECONDS) {
-    return false;
-  }
-
-  let secretBytes: Buffer;
-  try {
-    if (webhookSecret.startsWith("whsec_")) {
-      secretBytes = Buffer.from(webhookSecret.slice("whsec_".length), "base64");
-    } else {
-      secretBytes = Buffer.from(webhookSecret, "base64");
-    }
-  } catch {
-    return false;
-  }
-
-  const signedContent = `${svixId}.${svixTimestamp}.${rawBody}`;
-  const expected = createHmac("sha256", secretBytes)
-    .update(signedContent)
-    .digest("base64");
-
-  const candidates = svixSignature.split(" ").map((s) => s.trim()).filter(Boolean);
-  for (const candidate of candidates) {
-    const parts = candidate.split(",");
-    const version = parts[0];
-    const sig = parts.slice(1).join(",");
-    if (version !== "v1" || !sig) continue;
-    if (safeEqualUtf8(expected, sig)) {
-      return true;
-    }
-  }
-  return false;
+/** Safe diagnostic snapshot – never includes secret or signature values */
+export function describeWebhookAuthContext(
+  provider: ProviderName,
+  headers: Headers
+): Record<string, string | boolean | number> {
+  const secret = process.env.INBOUND_WEBHOOK_SECRET;
+  const hasSecret = Boolean(secret && secret.trim());
+  const secretTrimmed = secret?.trim() ?? "";
+  return {
+    provider,
+    has_inbound_webhook_secret: hasSecret,
+    secret_has_whsec_prefix: hasSecret && secretTrimmed.startsWith("whsec_"),
+    secret_length: hasSecret ? secretTrimmed.length : 0,
+    has_svix_id: Boolean(
+      headers.get("svix-id") || headers.get("webhook-id")
+    ),
+    has_svix_timestamp: Boolean(
+      headers.get("svix-timestamp") || headers.get("webhook-timestamp")
+    ),
+    has_svix_signature: Boolean(
+      headers.get("svix-signature") || headers.get("webhook-signature")
+    ),
+    has_mailgun_signature_header: Boolean(
+      headers.get("x-mailgun-signature")
+    ),
+    has_generic_signature_header: Boolean(
+      headers.get("x-webhook-signature")
+    ),
+    content_type: headers.get("content-type") || "none",
+  };
 }
 
 export function verifyGenericSignature(
@@ -198,15 +287,25 @@ export function verifyWebhookSignature(
   rawBody: string,
   parsedBody?: unknown
 ): boolean {
-  const secret = process.env.INBOUND_WEBHOOK_SECRET;
+  return verifyWebhookSignatureDetailed(provider, headers, rawBody, parsedBody)
+    .ok;
+}
+
+export function verifyWebhookSignatureDetailed(
+  provider: ProviderName,
+  headers: Headers,
+  rawBody: string,
+  parsedBody?: unknown
+): { ok: boolean; reason?: string } {
+  const secretRaw = process.env.INBOUND_WEBHOOK_SECRET;
+  const secret = secretRaw?.trim().replace(/^["']|["']$/g, "") ?? "";
+
   if (!secret) {
     if (process.env.NODE_ENV === "production") {
-      console.warn(
-        "[webhook] INBOUND_WEBHOOK_SECRET not set in production – rejecting"
-      );
-      return false;
+      return { ok: false, reason: "missing_secret" };
     }
-    return true;
+    // Local dev without a secret: allow (documented in README)
+    return { ok: true, reason: "dev_no_secret" };
   }
 
   switch (provider) {
@@ -220,20 +319,27 @@ export function verifyWebhookSignature(
         }
       }
       const auth = extractMailgunAuth(headers, body);
-      if (!auth) return false;
-      return verifyMailgunSignature(
+      if (!auth) return { ok: false, reason: "mailgun_auth_fields_missing" };
+      const ok = verifyMailgunSignature(
         secret,
         auth.timestamp,
         auth.token,
         auth.signature
       );
+      return ok
+        ? { ok: true }
+        : { ok: false, reason: "mailgun_signature_invalid" };
     }
     case "resend":
-      return verifyResendSignature(secret, headers, rawBody);
+      return verifyResendSignatureDetailed(secret, headers, rawBody);
     case "generic":
     default: {
       const header = headers.get("x-webhook-signature") || "";
-      return verifyGenericSignature(secret, rawBody, header);
+      if (!header) return { ok: false, reason: "missing_generic_signature_header" };
+      const ok = verifyGenericSignature(secret, rawBody, header);
+      return ok
+        ? { ok: true }
+        : { ok: false, reason: "generic_signature_invalid" };
     }
   }
 }
@@ -440,7 +546,10 @@ export async function fetchResendEmailContent(
 }
 
 export function getConfiguredProvider(): ProviderName {
-  const p = (process.env.INBOUND_PROVIDER || "generic").toLowerCase();
+  const p = (process.env.INBOUND_PROVIDER || "generic").toLowerCase().trim();
   if (p === "mailgun" || p === "resend" || p === "generic") return p;
+  console.warn(
+    "[webhook] Unknown INBOUND_PROVIDER value – falling back to generic"
+  );
   return "generic";
 }
