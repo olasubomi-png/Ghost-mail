@@ -299,7 +299,6 @@ describe("verifyResendSignatureDetailed failure reasons", () => {
   const body = JSON.stringify({ type: "email.received", data: { email_id: "e1" } });
 
   function sign(timestamp: string) {
-    const { createHmac } = require("crypto");
     const key = Buffer.from(secret.slice("whsec_".length), "base64");
     return createHmac("sha256", key)
       .update(`${id}.${timestamp}.${body}`, "utf8")
