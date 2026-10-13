@@ -344,6 +344,51 @@ export function verifyWebhookSignatureDetailed(
   }
 }
 
+
+/** Extract bare email addresses from a string or string array field. */
+export function extractEmailAddresses(value: unknown): string[] {
+  if (value == null) return [];
+  const list = Array.isArray(value) ? value : [value];
+  const out: string[] = [];
+  for (const item of list) {
+    if (item == null) continue;
+    const s = String(item).trim();
+    if (!s) continue;
+    // "Name <email@x.com>" or bare email
+    const angle = s.match(/<([^>]+@[^>]+)>/);
+    const email = (angle ? angle[1] : s).toLowerCase().trim();
+    if (email.includes("@") && !out.includes(email)) out.push(email);
+  }
+  return out;
+}
+
+/** Collect all plausible recipient addresses from a Resend event payload. */
+export function collectResendRecipients(body: unknown): string[] {
+  if (!body || typeof body !== "object") return [];
+  const b = body as Record<string, unknown>;
+  const data = (b.data as Record<string, unknown>) || b;
+  // Nested email object (inbox.email.received)
+  const emailObj =
+    data.email && typeof data.email === "object"
+      ? (data.email as Record<string, unknown>)
+      : null;
+
+  const sources = [
+    data.to,
+    data.received_for,
+    data.cc,
+    emailObj?.to,
+    emailObj?.received_for,
+  ];
+  const out: string[] = [];
+  for (const src of sources) {
+    for (const addr of extractEmailAddresses(src)) {
+      if (!out.includes(addr)) out.push(addr);
+    }
+  }
+  return out;
+}
+
 export function normalizeInboundPayload(
   provider: ProviderName,
   body: unknown
@@ -383,21 +428,45 @@ export function normalizeInboundPayload(
     } else if (provider === "resend" && typeof body === "object" && body !== null) {
       const b = body as Record<string, unknown>;
       const data = (b.data as Record<string, unknown>) || b;
-      const toField = data.to ?? data.received_for;
-      const toAddr = Array.isArray(toField)
-        ? String((toField as string[])[0] || "")
-        : String(toField || "");
+      const emailObj =
+        data.email && typeof data.email === "object"
+          ? (data.email as Record<string, unknown>)
+          : null;
+
+      // Prefer all recipients; first is a provisional "to" for schema validation.
+      // The webhook route will re-resolve against the DB using collectResendRecipients.
+      const recipients = collectResendRecipients(body);
+      const toAddr = recipients[0] || "";
+
+      const fromRaw =
+        emailObj?.from ?? data.from ?? "";
+      const fromStr = String(fromRaw);
+      const nameMatch = fromStr.match(/^"?([^"<]+)"?\s*</);
+
       candidate = {
-        // Prefer provider email_id for Receiving API; message_id is MIME Message-ID
-        externalId: data.email_id || data.id || b.id,
+        // email_id is required for Receiving API content fetch
+        externalId:
+          data.email_id ||
+          emailObj?.id ||
+          data.id ||
+          b.id ||
+          undefined,
         to: toAddr,
-        from: data.from,
-        subject: data.subject || "(no subject)",
+        from: fromStr.includes("<")
+          ? fromStr.replace(/^.*<([^>]+)>.*$/, "$1").trim()
+          : fromStr.trim(),
+        fromName: nameMatch ? nameMatch[1].trim() : undefined,
+        subject:
+          (emailObj?.subject as string) ||
+          (data.subject as string) ||
+          "(no subject)",
         textBody: data.text,
         htmlBody: data.html,
         receivedAt: data.created_at
           ? new Date(String(data.created_at))
-          : undefined,
+          : emailObj?.received_at
+            ? new Date(String(emailObj.received_at))
+            : undefined,
       };
     } else if (typeof body === "object" && body !== null) {
       const b = body as Record<string, unknown>;

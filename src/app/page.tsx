@@ -1,5 +1,6 @@
 import { Logo } from "@/components/ui/logo";
-import { EmailGenerator } from "@/components/landing/email-generator";
+import { EmailGenerator } from "@/components/landing/email-generator"
+import { AddressHistory } from "@/components/landing/address-history";
 import { isDomainConfigured, getEmailDomain, APP_NAME } from "@/lib/constants";
 import {
   Shield,
@@ -63,6 +64,7 @@ export default function LandingPage() {
                 domainConfigured={domainConfigured}
                 domainDisplay={domain}
               />
+              <AddressHistory />
             </div>
           </div>
         </section>

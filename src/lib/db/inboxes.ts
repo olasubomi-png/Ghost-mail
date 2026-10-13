@@ -57,7 +57,7 @@ export async function createInbox(opts: {
     local = generateRandomLocalPart();
   }
 
-  const address = `${local}@${domain}`;
+  const address = `${local}@${domain}`.toLowerCase();
   const accessToken = nanoid(32);
   const db = getDb();
 
@@ -111,12 +111,34 @@ export async function getInboxByToken(token: string): Promise<Inbox | null> {
 export async function getInboxByAddress(address: string): Promise<Inbox | null> {
   const db = getDb();
   const normalized = address.toLowerCase().trim();
+  if (!normalized.includes("@")) return null;
   const [row] = await db
     .select()
     .from(inboxes)
     .where(and(eq(inboxes.address, normalized), isNull(inboxes.deletedAt)))
     .limit(1);
   return row ?? null;
+}
+
+/**
+ * Try multiple recipient candidates (to, received_for, etc.) and return the
+ * first active inbox match. Order is preserved – first match wins.
+ */
+export async function resolveInboxByRecipients(
+  recipients: string[]
+): Promise<{ inbox: Inbox; matchedAddress: string } | null> {
+  const seen = new Set<string>();
+  for (const raw of recipients) {
+    const normalized = raw
+      .toLowerCase()
+      .trim()
+      .replace(/^.*<([^>]+)>.*$/, "$1");
+    if (!normalized.includes("@") || seen.has(normalized)) continue;
+    seen.add(normalized);
+    const inbox = await getInboxByAddress(normalized);
+    if (inbox) return { inbox, matchedAddress: normalized };
+  }
+  return null;
 }
 
 export async function softDeleteInbox(token: string): Promise<boolean> {

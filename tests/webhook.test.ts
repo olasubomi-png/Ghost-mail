@@ -13,6 +13,8 @@ import {
   extractMailgunAuth,
   parseFormBody,
   fetchResendEmailContent,
+  collectResendRecipients,
+  extractEmailAddresses,
 } from "../src/lib/email/provider";
 import {
   _memoryRateLimitForTests,
@@ -382,5 +384,46 @@ describe("verifyWebhookSignatureDetailed provider mismatch", () => {
     );
     expect(r.ok).toBe(false);
     expect(r.reason).toBe("missing_generic_signature_header");
+  });
+});
+
+
+describe("collectResendRecipients", () => {
+  it("collects to and received_for addresses", () => {
+    const body = {
+      type: "email.received",
+      data: {
+        email_id: "e1",
+        to: ["a@subxmail.com"],
+        received_for: ["b@subxmail.com"],
+        from: "x@gmail.com",
+        subject: "Hi",
+      },
+    };
+    const addrs = collectResendRecipients(body);
+    expect(addrs).toContain("a@subxmail.com");
+    expect(addrs).toContain("b@subxmail.com");
+  });
+
+  it("parses display-name form", () => {
+    expect(extractEmailAddresses("Alice <alice@x.com>")).toEqual([
+      "alice@x.com",
+    ]);
+  });
+
+  it("normalizes resend payload with only received_for", () => {
+    const body = {
+      type: "email.received",
+      data: {
+        email_id: "e2",
+        to: [],
+        received_for: ["keenmoon5837@subxmail.com"],
+        from: "subby90661@gmail.com",
+        subject: "Test",
+      },
+    };
+    const msg = normalizeInboundPayload("resend", body);
+    expect(msg?.to).toBe("keenmoon5837@subxmail.com");
+    expect(msg?.externalId).toBe("e2");
   });
 });

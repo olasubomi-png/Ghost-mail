@@ -7,6 +7,7 @@ import { Copy, Check, Sparkles, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { pushAddressHistory } from "@/lib/client/address-history";
 
 interface EmailGeneratorProps {
   domainConfigured: boolean;
@@ -52,6 +53,11 @@ export function EmailGenerator({
         }
 
         setLastAddress(data.address);
+        pushAddressHistory({
+          address: data.address,
+          accessToken: data.accessToken,
+          createdAt: data.createdAt || new Date().toISOString(),
+        });
         toast.success("Inbox created", {
           description: data.address,
         });
