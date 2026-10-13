@@ -41,28 +41,5 @@ export function formatRelativeTime(date: Date | string): string {
   });
 }
 
-/** Extract common OTP / verification codes from text. */
-export function extractVerificationCodes(text: string): string[] {
-  if (!text) return [];
-  const patterns = [
-    /\b(\d{6})\b/g, // 6-digit
-    /\b(\d{4})\b/g, // 4-digit
-    /\b([A-Z0-9]{6,8})\b/g, // alphanumeric codes
-  ];
-  const codes = new Set<string>();
-  for (const re of patterns) {
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(text)) !== null) {
-      // Prefer 6-digit over 4-digit noise
-      if (m[1].length >= 4) codes.add(m[1]);
-    }
-  }
-  // Prefer longer numeric codes first
-  return Array.from(codes).sort((a, b) => {
-    const aNum = /^\d+$/.test(a);
-    const bNum = /^\d+$/.test(b);
-    if (aNum && !bNum) return -1;
-    if (!aNum && bNum) return 1;
-    return b.length - a.length;
-  }).slice(0, 5);
-}
+/** @deprecated Prefer detectVerificationCodes from @/lib/email/detection */
+export { extractVerificationCodes } from "@/lib/email/detection";

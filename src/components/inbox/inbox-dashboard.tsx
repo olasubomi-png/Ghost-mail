@@ -10,9 +10,19 @@ import {
   Trash2,
   Mail,
   ArrowLeft,
+  ExternalLink,
+  ShieldCheck,
+  KeyRound,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn, formatRelativeTime, extractVerificationCodes } from "@/lib/utils";
+import { cn, formatRelativeTime } from "@/lib/utils";
+import {
+  detectVerificationCodes,
+  detectVerificationLinks,
+  primaryVerificationCode,
+  type DetectedCode,
+  type DetectedLink,
+} from "@/lib/email/detection";
 
 interface MessageSummary {
   id: string;
@@ -39,6 +49,9 @@ interface InboxDashboardProps {
   token: string;
 }
 
+const POLL_VISIBLE_MS = 5_000;
+const POLL_HIDDEN_MS = 30_000;
+
 export function InboxDashboard({ token }: InboxDashboardProps) {
   const router = useRouter();
   const [address, setAddress] = useState<string | null>(null);
@@ -48,14 +61,27 @@ export function InboxDashboard({ token }: InboxDashboardProps) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [showMobileDetail, setShowMobileDetail] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [newMessageFlash, setNewMessageFlash] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inFlightRef = useRef(false);
+  const knownIdsRef = useRef<Set<string>>(new Set());
+  const selectedIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
 
   const fetchInbox = useCallback(
     async (silent = false) => {
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
       if (!silent) setRefreshing(true);
       try {
-        const res = await fetch(`/api/inbox/${token}`);
+        const res = await fetch(`/api/inbox/${token}`, {
+          cache: "no-store",
+        });
         if (res.status === 404) {
           toast.error("Inbox not found or deleted");
           router.push("/");
@@ -64,12 +90,31 @@ export function InboxDashboard({ token }: InboxDashboardProps) {
         if (!res.ok) throw new Error("Failed to load");
         const data = await res.json();
         setAddress(data.address);
-        setMessages(data.messages || []);
+        const next: MessageSummary[] = data.messages || [];
+
+        // Detect newly arrived messages without disturbing selection
+        const nextIds = new Set(next.map((m) => m.id));
+        if (knownIdsRef.current.size > 0) {
+          const arrived = next.filter((m) => !knownIdsRef.current.has(m.id));
+          if (arrived.length > 0) {
+            setNewMessageFlash(true);
+            window.setTimeout(() => setNewMessageFlash(false), 2500);
+            toast.success(
+              arrived.length === 1
+                ? "New message received"
+                : `${arrived.length} new messages`,
+              { description: arrived[0]?.subject }
+            );
+          }
+        }
+        knownIdsRef.current = nextIds;
+        setMessages(next);
       } catch {
         if (!silent) toast.error("Could not refresh inbox");
       } finally {
         setLoading(false);
         setRefreshing(false);
+        inFlightRef.current = false;
       }
     },
     [token, router]
@@ -78,14 +123,18 @@ export function InboxDashboard({ token }: InboxDashboardProps) {
   const fetchMessage = useCallback(
     async (id: string) => {
       try {
-        const res = await fetch(`/api/inbox/${token}/messages/${id}`);
+        const res = await fetch(`/api/inbox/${token}/messages/${id}`, {
+          cache: "no-store",
+        });
         if (!res.ok) throw new Error("Failed");
         const data = await res.json();
-        setDetail(data);
-        // Mark read locally
-        setMessages((prev) =>
-          prev.map((m) => (m.id === id ? { ...m, isRead: true } : m))
-        );
+        // Only apply if still selected
+        if (selectedIdRef.current === id) {
+          setDetail(data);
+          setMessages((prev) =>
+            prev.map((m) => (m.id === id ? { ...m, isRead: true } : m))
+          );
+        }
       } catch {
         toast.error("Could not load message");
       }
@@ -93,11 +142,38 @@ export function InboxDashboard({ token }: InboxDashboardProps) {
     [token]
   );
 
+  // Visibility-aware polling
   useEffect(() => {
+    let cancelled = false;
+
+    const schedule = () => {
+      if (cancelled) return;
+      if (pollRef.current) clearTimeout(pollRef.current);
+      const hidden =
+        typeof document !== "undefined" && document.visibilityState === "hidden";
+      const delay = hidden ? POLL_HIDDEN_MS : POLL_VISIBLE_MS;
+      pollRef.current = setTimeout(async () => {
+        if (cancelled) return;
+        await fetchInbox(true);
+        schedule();
+      }, delay);
+    };
+
     fetchInbox();
-    pollRef.current = setInterval(() => fetchInbox(true), 12_000);
+    schedule();
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        void fetchInbox(true);
+      }
+      schedule();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
+      cancelled = true;
+      if (pollRef.current) clearTimeout(pollRef.current);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [fetchInbox]);
 
@@ -126,7 +202,9 @@ export function InboxDashboard({ token }: InboxDashboardProps) {
   const copyCode = async (code: string) => {
     try {
       await navigator.clipboard.writeText(code);
-      toast.success(`Copied ${code}`);
+      setCopiedCode(code);
+      toast.success("Code copied", { description: code });
+      setTimeout(() => setCopiedCode(null), 2000);
     } catch {
       toast.error("Copy failed");
     }
@@ -169,6 +247,14 @@ export function InboxDashboard({ token }: InboxDashboardProps) {
 
   const unreadCount = messages.filter((m) => !m.isRead).length;
 
+  const codes: DetectedCode[] = detail
+    ? detectVerificationCodes(detail.subject, detail.textBody, detail.htmlBody)
+    : [];
+  const primary = primaryVerificationCode(codes);
+  const links: DetectedLink[] = detail
+    ? detectVerificationLinks(detail.textBody, detail.htmlBody)
+    : [];
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -180,15 +266,8 @@ export function InboxDashboard({ token }: InboxDashboardProps) {
     );
   }
 
-  const codes = detail
-    ? extractVerificationCodes(
-        [detail.textBody, detail.subject].filter(Boolean).join("\n")
-      )
-    : [];
-
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Top bar */}
       <header className="sticky top-0 z-40 border-b border-border bg-surface/90 backdrop-blur-md">
         <div className="mx-auto max-w-7xl px-3 sm:px-6 h-14 flex items-center gap-3">
           <Button
@@ -219,6 +298,11 @@ export function InboxDashboard({ token }: InboxDashboardProps) {
                 <Copy className="h-3.5 w-3.5" />
               )}
             </Button>
+            {newMessageFlash && (
+              <span className="hidden sm:inline-flex items-center rounded-full bg-success/15 text-success text-[11px] font-medium px-2 py-0.5 animate-fade-in">
+                New mail
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
@@ -246,9 +330,7 @@ export function InboxDashboard({ token }: InboxDashboardProps) {
         </div>
       </header>
 
-      {/* Main split view */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Message list */}
         <aside
           className={cn(
             "w-full md:w-80 lg:w-96 border-r border-border flex flex-col bg-surface/50",
@@ -274,9 +356,9 @@ export function InboxDashboard({ token }: InboxDashboardProps) {
                   <Mail className="h-6 w-6 text-muted" />
                 </div>
                 <p className="text-sm font-medium">No messages yet</p>
-                <p className="mt-1 text-xs text-muted max-w-[200px]">
-                  Send an email to this address. New messages appear
-                  automatically.
+                <p className="mt-1 text-xs text-muted max-w-[220px]">
+                  Send a verification email to this address. New messages appear
+                  automatically every few seconds.
                 </p>
               </div>
             ) : (
@@ -326,10 +408,9 @@ export function InboxDashboard({ token }: InboxDashboardProps) {
           </div>
         </aside>
 
-        {/* Message detail */}
         <section
           className={cn(
-            "flex-1 flex flex-col bg-background",
+            "flex-1 flex flex-col bg-background min-w-0",
             !showMobileDetail && "hidden md:flex"
           )}
         >
@@ -342,7 +423,6 @@ export function InboxDashboard({ token }: InboxDashboardProps) {
             </div>
           ) : (
             <>
-              {/* Detail header */}
               <div className="border-b border-border px-4 sm:px-6 py-4">
                 <div className="flex items-start gap-3">
                   <Button
@@ -362,7 +442,7 @@ export function InboxDashboard({ token }: InboxDashboardProps) {
                       {detail.subject}
                     </h1>
                     <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-foreground-secondary">
-                      <span>
+                      <span className="break-all">
                         {detail.fromName
                           ? `${detail.fromName} <${detail.fromAddress}>`
                           : detail.fromAddress}
@@ -382,25 +462,91 @@ export function InboxDashboard({ token }: InboxDashboardProps) {
                   </Button>
                 </div>
 
-                {/* Verification codes */}
-                {codes.length > 0 && (
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {codes.map((code) => (
-                      <button
-                        key={code}
+                {/* Primary OTP */}
+                {primary && (
+                  <div className="mt-4 rounded-xl border border-accent/30 bg-accent/10 p-4">
+                    <div className="flex items-center gap-2 text-xs font-medium text-accent mb-2">
+                      <KeyRound className="h-3.5 w-3.5" />
+                      Detected verification code
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className="text-2xl sm:text-3xl font-mono font-semibold tracking-widest text-foreground">
+                        {primary.code}
+                      </span>
+                      <Button
                         type="button"
-                        onClick={() => copyCode(code)}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-accent/15 border border-accent/30 px-3 py-1.5 text-sm font-mono text-accent hover:bg-accent/25 transition-colors"
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => copyCode(primary.code)}
+                        aria-label={`Copy verification code ${primary.code}`}
                       >
-                        {code}
-                        <Copy className="h-3 w-3 opacity-70" />
-                      </button>
+                        {copiedCode === primary.code ? (
+                          <>
+                            <Check className="h-3.5 w-3.5 text-success" />
+                            Copied
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-3.5 w-3.5" />
+                            Copy code
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                    {codes.length > 1 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {codes
+                          .filter((c) => c.code !== primary.code)
+                          .map((c) => (
+                            <button
+                              key={c.code}
+                              type="button"
+                              onClick={() => copyCode(c.code)}
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-surface-elevated border border-border px-2.5 py-1 text-xs font-mono text-foreground-secondary hover:text-foreground transition-colors"
+                              aria-label={`Copy alternative code ${c.code}`}
+                            >
+                              {c.code}
+                              <Copy className="h-3 w-3 opacity-60" />
+                            </button>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Verification links – user must open intentionally */}
+                {links.length > 0 && (
+                  <div className="mt-3 rounded-xl border border-border bg-surface-elevated/80 p-4 space-y-2">
+                    <div className="flex items-center gap-2 text-xs font-medium text-foreground-secondary">
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                      Possible verification link
+                      <span className="text-muted font-normal">
+                        · opens in a new tab · not verified by Ghost Mail
+                      </span>
+                    </div>
+                    {links.map((link) => (
+                      <div
+                        key={link.url}
+                        className="flex flex-col sm:flex-row sm:items-center gap-2"
+                      >
+                        <a
+                          href={link.url}
+                          target="_blank"
+                          rel="noopener noreferrer nofollow"
+                          className="inline-flex items-center gap-1.5 text-sm text-accent hover:underline break-all"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                          {link.label}
+                        </a>
+                        <span className="text-[11px] text-muted truncate max-w-full sm:max-w-xs font-mono">
+                          {link.url}
+                        </span>
+                      </div>
                     ))}
                   </div>
                 )}
               </div>
 
-              {/* Body */}
               <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-5">
                 {detail.htmlBody ? (
                   <div
