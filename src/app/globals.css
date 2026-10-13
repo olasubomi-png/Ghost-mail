@@ -89,3 +89,18 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #52525b;
 }
+
+/* Mobile safe areas */
+@supports (padding: env(safe-area-inset-bottom)) {
+  body {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* Reduce motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-slide-up {
+    animation: none;
+  }
+}

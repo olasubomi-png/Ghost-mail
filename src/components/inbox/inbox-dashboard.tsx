@@ -13,8 +13,12 @@ import {
   ExternalLink,
   ShieldCheck,
   KeyRound,
+  Search,
+  X,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import {
   detectVerificationCodes,
@@ -23,6 +27,11 @@ import {
   type DetectedCode,
   type DetectedLink,
 } from "@/lib/email/detection";
+import {
+  senderInitials,
+  filterMessages,
+  avatarTone,
+} from "@/lib/inbox-ui";
 
 interface MessageSummary {
   id: string;
@@ -64,6 +73,8 @@ export function InboxDashboard({ token }: InboxDashboardProps) {
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [showMobileDetail, setShowMobileDetail] = useState(false);
   const [newMessageFlash, setNewMessageFlash] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [loadError, setLoadError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightRef = useRef(false);
   const knownIdsRef = useRef<Set<string>>(new Set());
@@ -109,8 +120,12 @@ export function InboxDashboard({ token }: InboxDashboardProps) {
         }
         knownIdsRef.current = nextIds;
         setMessages(next);
+        setLoadError(null);
       } catch {
-        if (!silent) toast.error("Could not refresh inbox");
+        if (!silent) {
+          setLoadError("Could not load inbox. Check your connection and try again.");
+          toast.error("Could not refresh inbox");
+        }
       } finally {
         setLoading(false);
         setRefreshing(false);
@@ -245,6 +260,7 @@ export function InboxDashboard({ token }: InboxDashboardProps) {
     }
   };
 
+  const filteredMessages = filterMessages(messages, searchQuery);
   const unreadCount = messages.filter((m) => !m.isRead).length;
 
   const codes: DetectedCode[] = detail
@@ -337,17 +353,59 @@ export function InboxDashboard({ token }: InboxDashboardProps) {
             showMobileDetail && "hidden md:flex"
           )}
         >
-          <div className="px-4 py-3 border-b border-border-subtle flex items-center justify-between">
-            <h2 className="text-sm font-medium flex items-center gap-2">
-              Inbox
-              {unreadCount > 0 && (
-                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-[10px] font-semibold text-white">
-                  {unreadCount}
-                </span>
+          <div className="px-4 py-3 border-b border-border-subtle space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-medium flex items-center gap-2">
+                Inbox
+                {unreadCount > 0 && (
+                  <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-[10px] font-semibold text-white">
+                    {unreadCount}
+                  </span>
+                )}
+              </h2>
+              <span className="text-xs text-muted">
+                {searchQuery
+                  ? `${filteredMessages.length} of ${messages.length}`
+                  : `${messages.length} messages`}
+              </span>
+            </div>
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted pointer-events-none" />
+              <Input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search mail"
+                aria-label="Search messages"
+                className="pl-8 pr-8 h-9 text-sm bg-background/60"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-foreground"
+                  aria-label="Clear search"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
               )}
-            </h2>
-            <span className="text-xs text-muted">{messages.length} messages</span>
+            </div>
           </div>
+
+          {loadError && (
+            <div className="mx-3 mt-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2.5 text-xs text-danger flex items-start gap-2">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p>{loadError}</p>
+                <button
+                  type="button"
+                  onClick={() => fetchInbox()}
+                  className="mt-1.5 font-medium underline underline-offset-2"
+                >
+                  Retry
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="flex-1 overflow-y-auto">
             {messages.length === 0 ? (
@@ -361,48 +419,81 @@ export function InboxDashboard({ token }: InboxDashboardProps) {
                   automatically every few seconds.
                 </p>
               </div>
+            ) : filteredMessages.length === 0 ? (
+              <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+                <Search className="h-8 w-8 text-muted mb-3 opacity-50" />
+                <p className="text-sm font-medium">No matching messages</p>
+                <p className="mt-1 text-xs text-muted">
+                  Try a different search term
+                </p>
+              </div>
             ) : (
               <ul className="divide-y divide-border-subtle">
-                {messages.map((m) => (
-                  <li key={m.id}>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedId(m.id)}
-                      className={cn(
-                        "w-full text-left px-4 py-3.5 hover:bg-surface-elevated transition-colors focus-visible:outline-none focus-visible:bg-surface-elevated",
-                        selectedId === m.id && "bg-surface-elevated",
-                        !m.isRead && "border-l-2 border-l-accent"
-                      )}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <span
-                          className={cn(
-                            "text-sm truncate",
-                            !m.isRead
-                              ? "font-semibold text-foreground"
-                              : "text-foreground-secondary"
-                          )}
-                        >
-                          {m.fromName || m.fromAddress}
-                        </span>
-                        <span className="text-[11px] text-muted shrink-0">
-                          {formatRelativeTime(m.receivedAt)}
-                        </span>
-                      </div>
-                      <p
+                {filteredMessages.map((m) => {
+                  const initials = senderInitials(m.fromName, m.fromAddress);
+                  const tone = avatarTone(m.fromAddress);
+                  return (
+                    <li key={m.id}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedId(m.id)}
                         className={cn(
-                          "mt-0.5 text-sm truncate",
-                          !m.isRead ? "text-foreground" : "text-muted"
+                          "w-full text-left px-3 sm:px-4 py-3 hover:bg-surface-elevated transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40",
+                          selectedId === m.id && "bg-surface-elevated",
+                          !m.isRead && "bg-accent/[0.04]"
                         )}
                       >
-                        {m.subject}
-                      </p>
-                      <p className="mt-0.5 text-xs text-muted truncate">
-                        {m.preview}
-                      </p>
-                    </button>
-                  </li>
-                ))}
+                        <div className="flex gap-3">
+                          <div
+                            className={cn(
+                              "mt-0.5 h-9 w-9 shrink-0 rounded-full flex items-center justify-center text-[11px] font-semibold text-white",
+                              tone
+                            )}
+                            aria-hidden
+                          >
+                            {initials}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-start justify-between gap-2">
+                              <span
+                                className={cn(
+                                  "text-sm truncate",
+                                  !m.isRead
+                                    ? "font-semibold text-foreground"
+                                    : "text-foreground-secondary"
+                                )}
+                              >
+                                {m.fromName || m.fromAddress}
+                              </span>
+                              <span className="text-[11px] text-muted shrink-0 tabular-nums">
+                                {formatRelativeTime(m.receivedAt)}
+                              </span>
+                            </div>
+                            <p
+                              className={cn(
+                                "mt-0.5 text-sm truncate",
+                                !m.isRead
+                                  ? "font-medium text-foreground"
+                                  : "text-muted"
+                              )}
+                            >
+                              {m.subject || "(no subject)"}
+                            </p>
+                            <p className="mt-0.5 text-xs text-muted truncate">
+                              {m.preview}
+                            </p>
+                          </div>
+                          {!m.isRead && (
+                            <span
+                              className="mt-2 h-2 w-2 shrink-0 rounded-full bg-accent"
+                              aria-label="Unread"
+                            />
+                          )}
+                        </div>
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>
