@@ -197,3 +197,31 @@ CREATE TABLE IF NOT EXISTS rate_limit_counters (
 
 Or: `npm run db:push` against a non-production branch. Do not reset production data.
 The previous `rate_limit_buckets` table is unused and may be dropped manually if present.
+
+
+## User accounts (Milestone 1)
+
+Ghost Mail supports optional registered accounts with permanent owned mailboxes.
+
+### Auth tables migration
+
+Apply the additive SQL in `src/lib/db/migrations/0001_auth_accounts.sql` against Neon
+before enabling accounts in production (or run `npm run db:push` after reviewing the schema):
+
+- `users`, `sessions`, `auth_tokens` tables
+- nullable `inboxes.user_id` (existing inboxes stay anonymous)
+
+### New environment variables
+
+- `RESEND_API_KEY` — also used to send verification and password-reset email
+- `AUTH_FROM_EMAIL` — optional From address for auth mail
+- `NEXT_PUBLIC_APP_URL` — used to build verification links
+
+### Security model
+
+- Passwords hashed with Node `scrypt` (never stored in plaintext)
+- HTTP-only session cookies; session tokens stored hashed in the database
+- Account-owned mailboxes require a matching session (access token alone is not enough)
+- Anonymous inboxes continue to work with access tokens
+- Auth endpoints are rate-limited
+

@@ -3,6 +3,7 @@ import { createInbox, InboxError } from "@/lib/db/inboxes";
 import { createInboxSchema } from "@/lib/validation";
 import { rateLimit } from "@/lib/rate-limit";
 import { isDomainConfigured } from "@/lib/constants";
+import { getCurrentUser } from "@/lib/auth/session";
 
 export const runtime = "nodejs";
 
@@ -40,7 +41,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const inbox = await createInbox({ localPart: parsed.data.localPart });
+    const user = await getCurrentUser();
+    const inbox = await createInbox({
+      localPart: parsed.data.localPart,
+      userId: user?.id ?? null,
+    });
 
     return NextResponse.json(
       {

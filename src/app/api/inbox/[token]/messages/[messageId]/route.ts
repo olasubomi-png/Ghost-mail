@@ -4,7 +4,9 @@ import {
   getMessage,
   markMessageRead,
   softDeleteMessage,
+  canAccessInbox,
 } from "@/lib/db/inboxes";
+import { getCurrentUser } from "@/lib/auth/session";
 
 export const runtime = "nodejs";
 
@@ -20,6 +22,11 @@ export async function GET(_req: NextRequest, { params }: Params) {
     const inbox = await getInboxByToken(token);
     if (!inbox) {
       return NextResponse.json({ error: "Inbox not found" }, { status: 404 });
+    }
+
+    const user = await getCurrentUser();
+    if (!canAccessInbox(inbox, { token, userId: user?.id ?? null })) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const message = await getMessage(inbox.id, messageId);
@@ -58,6 +65,11 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     const inbox = await getInboxByToken(token);
     if (!inbox) {
       return NextResponse.json({ error: "Inbox not found" }, { status: 404 });
+    }
+
+    const user = await getCurrentUser();
+    if (!canAccessInbox(inbox, { token, userId: user?.id ?? null })) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const deleted = await softDeleteMessage(inbox.id, messageId);

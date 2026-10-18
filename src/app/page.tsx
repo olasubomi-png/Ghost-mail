@@ -22,12 +22,21 @@ export default function LandingPage() {
       <header className="sticky top-0 z-50 glass">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 h-16 flex items-center justify-between">
           <Logo />
-          <nav className="hidden sm:flex items-center gap-6 text-sm text-foreground-secondary">
-            <a href="#how-it-works" className="hover:text-foreground transition-colors">
+          <nav className="flex items-center gap-3 sm:gap-6 text-sm text-foreground-secondary">
+            <a href="#how-it-works" className="hidden sm:inline hover:text-foreground transition-colors">
               How it works
             </a>
-            <a href="#features" className="hover:text-foreground transition-colors">
+            <a href="#features" className="hidden sm:inline hover:text-foreground transition-colors">
               Features
+            </a>
+            <a href="/login" className="hover:text-foreground transition-colors">
+              Sign in
+            </a>
+            <a
+              href="/register"
+              className="rounded-lg bg-accent px-3 py-1.5 text-white hover:bg-accent-hover transition-colors"
+            >
+              Register
             </a>
           </nav>
         </div>

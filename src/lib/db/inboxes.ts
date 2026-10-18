@@ -34,6 +34,8 @@ function isUniqueViolation(err: unknown): boolean {
 
 export async function createInbox(opts: {
   localPart?: string;
+  /** When set, mailbox is owned by this account (session required to open). */
+  userId?: string | null;
 }): Promise<Inbox> {
   const domain = getEmailDomain();
   if (!domain) {
@@ -82,6 +84,7 @@ export async function createInbox(opts: {
         localPart: local,
         address,
         accessToken,
+        userId: opts.userId ?? null,
       })
       .returning();
     return row;
@@ -139,6 +142,32 @@ export async function resolveInboxByRecipients(
     if (inbox) return { inbox, matchedAddress: normalized };
   }
   return null;
+}
+
+
+export async function listInboxesByUser(userId: string): Promise<Inbox[]> {
+  const db = getDb();
+  return db
+    .select()
+    .from(inboxes)
+    .where(and(eq(inboxes.userId, userId), isNull(inboxes.deletedAt)))
+    .orderBy(desc(inboxes.createdAt));
+}
+
+/**
+ * Access rules:
+ * - Anonymous inbox (userId null): valid accessToken is enough.
+ * - Owned inbox: caller must be the owning user (session). Token alone is insufficient.
+ */
+export function canAccessInbox(
+  inbox: Inbox,
+  opts: { token?: string | null; userId?: string | null }
+): boolean {
+  if (inbox.deletedAt) return false;
+  if (inbox.userId) {
+    return Boolean(opts.userId && opts.userId === inbox.userId);
+  }
+  return Boolean(opts.token && opts.token === inbox.accessToken);
 }
 
 export async function softDeleteInbox(token: string): Promise<boolean> {
