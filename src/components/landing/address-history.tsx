@@ -3,14 +3,14 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Copy, Check, Inbox, Trash2, Clock } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Copy, Check, Trash2 } from "lucide-react";
 import {
   loadAddressHistory,
   removeAddressHistory,
   type HistoryEntry,
 } from "@/lib/client/address-history";
 import { formatRelativeTime } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 export function AddressHistory() {
   const router = useRouter();
@@ -56,8 +56,8 @@ export function AddressHistory() {
 
   if (!hydrated) {
     return (
-      <div className="mt-10 max-w-xl mx-auto">
-        <div className="h-24 rounded-xl bg-surface/50 border border-border-subtle animate-pulse" />
+      <div className="mt-8 max-w-md mx-auto">
+        <div className="h-16 rounded-lg bg-surface/40 border border-border-subtle animate-pulse" />
       </div>
     );
   }
@@ -67,63 +67,73 @@ export function AddressHistory() {
   }
 
   return (
-    <div className="mt-10 max-w-xl mx-auto text-left animate-fade-in">
-      <div className="flex items-center justify-between mb-3 px-1">
-        <h2 className="text-sm font-medium text-foreground-secondary flex items-center gap-2">
-          <Clock className="h-3.5 w-3.5" />
-          Recent addresses
+    <div className="mt-8 max-w-md mx-auto text-left">
+      <div className="flex items-baseline justify-between gap-3 mb-2 px-0.5">
+        <h2 className="text-xs font-medium uppercase tracking-wide text-muted">
+          Recent
         </h2>
-        <span className="text-[11px] text-muted">Stored on this device only</span>
+        <span className="text-[11px] text-muted">This device only</span>
       </div>
-      <ul className="rounded-xl border border-border bg-surface/60 divide-y divide-border-subtle overflow-hidden">
+
+      <ul className="divide-y divide-border-subtle border-t border-b border-border-subtle">
         {entries.map((entry) => (
           <li
             key={entry.accessToken}
-            className="flex flex-col sm:flex-row sm:items-center gap-2 px-4 py-3 hover:bg-surface-elevated/60 transition-colors"
+            className="group flex items-center gap-2 py-3 min-h-[52px]"
           >
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-foreground truncate font-mono">
+            <button
+              type="button"
+              onClick={() => openInbox(entry)}
+              className="flex-1 min-w-0 text-left rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            >
+              <p className="text-sm font-mono text-foreground truncate">
                 {entry.address}
               </p>
               <p className="text-[11px] text-muted mt-0.5">
-                Created {formatRelativeTime(entry.createdAt)}
+                {formatRelativeTime(entry.createdAt)}
               </p>
-            </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              <Button
+            </button>
+
+            <div className="flex items-center shrink-0">
+              <button
                 type="button"
-                variant="ghost"
-                size="sm"
-                className="h-8 px-2"
                 onClick={() => copy(entry.address)}
                 aria-label={`Copy ${entry.address}`}
+                className={cn(
+                  "inline-flex h-9 w-9 items-center justify-center rounded-md text-muted",
+                  "hover:text-foreground hover:bg-surface transition-colors",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                )}
               >
                 {copied === entry.address ? (
                   <Check className="h-3.5 w-3.5 text-success" />
                 ) : (
                   <Copy className="h-3.5 w-3.5" />
                 )}
-              </Button>
-              <Button
+              </button>
+              <button
                 type="button"
-                variant="secondary"
-                size="sm"
-                className="h-8 gap-1.5"
                 onClick={() => openInbox(entry)}
+                className={cn(
+                  "inline-flex h-9 items-center px-2.5 rounded-md text-xs font-medium",
+                  "text-foreground-secondary hover:text-foreground hover:bg-surface transition-colors",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                )}
               >
-                <Inbox className="h-3.5 w-3.5" />
                 Open
-              </Button>
-              <Button
+              </button>
+              <button
                 type="button"
-                variant="ghost"
-                size="sm"
-                className="h-8 px-2 text-muted hover:text-danger"
                 onClick={() => remove(entry.address)}
                 aria-label="Remove from history"
+                className={cn(
+                  "inline-flex h-9 w-9 items-center justify-center rounded-md text-muted",
+                  "hover:text-danger hover:bg-danger/10 transition-colors",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+                )}
               >
                 <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+              </button>
             </div>
           </li>
         ))}

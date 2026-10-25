@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Copy, Check, Sparkles, ArrowRight } from "lucide-react";
+import { Copy, Check, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -40,9 +40,7 @@ export function EmailGenerator({
         const res = await fetch("/api/inbox/create", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(
-            localPart ? { localPart } : {}
-          ),
+          body: JSON.stringify(localPart ? { localPart } : {}),
         });
 
         const data = await res.json();
@@ -62,7 +60,6 @@ export function EmailGenerator({
           description: data.address,
         });
 
-        // Navigate to the secure inbox
         router.push(`/inbox/${data.accessToken}`);
       } catch {
         toast.error("Network error. Please try again.");
@@ -86,112 +83,117 @@ export function EmailGenerator({
   }, [lastAddress]);
 
   return (
-    <div className="w-full max-w-xl mx-auto animate-slide-up">
-      <div className="rounded-2xl border border-border bg-surface/80 p-1 shadow-2xl shadow-black/40">
-        <div className="rounded-xl bg-surface-elevated p-5 sm:p-6 space-y-5">
-          {/* Mode toggle */}
-          <div className="flex gap-1 p-1 rounded-lg bg-background border border-border-subtle">
-            <button
-              type="button"
-              onClick={() => setMode("random")}
-              className={cn(
-                "flex-1 py-2 px-3 rounded-md text-sm font-medium transition-all",
-                mode === "random"
-                  ? "bg-accent text-white shadow"
-                  : "text-foreground-secondary hover:text-foreground"
-              )}
-            >
-              Random
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode("custom")}
-              className={cn(
-                "flex-1 py-2 px-3 rounded-md text-sm font-medium transition-all",
-                mode === "custom"
-                  ? "bg-accent text-white shadow"
-                  : "text-foreground-secondary hover:text-foreground"
-              )}
-            >
-              Custom
-            </button>
-          </div>
-
-          {mode === "custom" && (
-            <div className="flex flex-col sm:flex-row gap-2">
-              <div className="relative flex-1">
-                <Input
-                  placeholder="your-username"
-                  value={customUsername}
-                  onChange={(e) => setCustomUsername(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && customUsername.trim()) {
-                      generate(customUsername.trim());
-                    }
-                  }}
-                  disabled={isGenerating}
-                  aria-label="Custom username"
-                  className="pr-28 font-mono text-sm"
-                />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted pointer-events-none font-mono">
-                  @{domainDisplay || "…"}
-                </span>
-              </div>
-              <Button
-                onClick={() => generate(customUsername.trim())}
-                isLoading={isGenerating}
-                disabled={!customUsername.trim() || isGenerating}
-                className="shrink-0"
-              >
-                Create
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </div>
-          )}
-
-          {mode === "random" && (
-            <Button
-              size="lg"
-              className="w-full"
-              onClick={() => generate()}
-              isLoading={isGenerating}
-              disabled={isGenerating}
-            >
-              <Sparkles className="h-4 w-4" />
-              Generate random address
-            </Button>
-          )}
-
-          {!domainConfigured && (
-            <p className="text-xs text-warning text-center leading-relaxed">
-              Real email delivery requires{" "}
-              <code className="px-1 py-0.5 rounded bg-background text-foreground-secondary">
-                EMAIL_DOMAIN
-              </code>{" "}
-              and an inbound provider to be configured.
-            </p>
-          )}
-
-          {lastAddress && (
-            <div className="flex items-center gap-2 p-3 rounded-lg bg-background border border-border">
-              <code className="flex-1 text-sm font-mono text-accent truncate">
-                {lastAddress}
-              </code>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={copyAddress}
-                aria-label="Copy address"
-              >
-                {copied ? (
-                  <Check className="h-4 w-4 text-success" />
-                ) : (
-                  <Copy className="h-4 w-4" />
-                )}
-              </Button>
-            </div>
-          )}
+    <div className="w-full max-w-md mx-auto">
+      <div className="rounded-xl border border-border bg-surface p-4 sm:p-5 space-y-4">
+        <div
+          role="tablist"
+          aria-label="Address type"
+          className="grid grid-cols-2 gap-0.5 p-0.5 rounded-lg bg-background border border-border-subtle"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "random"}
+            onClick={() => setMode("random")}
+            className={cn(
+              "py-2 px-3 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface",
+              mode === "random"
+                ? "bg-surface-elevated text-foreground shadow-sm"
+                : "text-foreground-secondary hover:text-foreground"
+            )}
+          >
+            Random
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "custom"}
+            onClick={() => setMode("custom")}
+            className={cn(
+              "py-2 px-3 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface",
+              mode === "custom"
+                ? "bg-surface-elevated text-foreground shadow-sm"
+                : "text-foreground-secondary hover:text-foreground"
+            )}
+          >
+            Custom
+          </button>
         </div>
+
+        {mode === "custom" && (
+          <div className="flex flex-col gap-3">
+            <div className="relative">
+              <Input
+                placeholder="username"
+                value={customUsername}
+                onChange={(e) => setCustomUsername(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && customUsername.trim()) {
+                    generate(customUsername.trim());
+                  }
+                }}
+                disabled={isGenerating}
+                aria-label="Custom username"
+                className="pr-[min(42%,11rem)] font-mono text-sm h-11"
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted pointer-events-none font-mono truncate max-w-[40%]">
+                @{domainDisplay || "…"}
+              </span>
+            </div>
+            <Button
+              onClick={() => generate(customUsername.trim())}
+              isLoading={isGenerating}
+              disabled={!customUsername.trim() || isGenerating}
+              className="w-full h-11 text-[#050A14]"
+            >
+              Create address
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
+
+        {mode === "random" && (
+          <Button
+            size="lg"
+            className="w-full h-11 text-[#050A14] shadow-none"
+            onClick={() => generate()}
+            isLoading={isGenerating}
+            disabled={isGenerating}
+          >
+            Generate random address
+          </Button>
+        )}
+
+        {!domainConfigured && (
+          <p className="text-xs text-warning text-center leading-relaxed">
+            Real email delivery requires{" "}
+            <code className="px-1 py-0.5 rounded bg-background text-foreground-secondary">
+              EMAIL_DOMAIN
+            </code>{" "}
+            and an inbound provider.
+          </p>
+        )}
+
+        {lastAddress && (
+          <div className="flex items-center gap-2 rounded-lg border border-border-subtle bg-background px-3 py-2.5">
+            <code className="flex-1 min-w-0 text-sm font-mono text-foreground truncate">
+              {lastAddress}
+            </code>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={copyAddress}
+              aria-label="Copy address"
+              className="h-8 w-8 p-0 shrink-0"
+            >
+              {copied ? (
+                <Check className="h-4 w-4 text-success" />
+              ) : (
+                <Copy className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

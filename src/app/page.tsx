@@ -1,5 +1,5 @@
 import { Logo } from "@/components/ui/logo";
-import { EmailGenerator } from "@/components/landing/email-generator"
+import { EmailGenerator } from "@/components/landing/email-generator";
 import { AddressHistory } from "@/components/landing/address-history";
 import { isDomainConfigured, getEmailDomain, APP_NAME } from "@/lib/constants";
 import {
@@ -19,22 +19,31 @@ export default function LandingPage() {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <header className="sticky top-0 z-50 glass">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 h-16 flex items-center justify-between">
-          <Logo />
-          <nav className="flex items-center gap-3 sm:gap-6 text-sm text-foreground-secondary">
-            <a href="#how-it-works" className="hidden sm:inline hover:text-foreground transition-colors">
+      <header className="sticky top-0 z-50 border-b border-border-subtle bg-background/90 backdrop-blur-md">
+        <div className="mx-auto max-w-5xl px-4 sm:px-6 h-14 flex items-center justify-between">
+          <Logo size="sm" />
+          <nav className="flex items-center gap-1 sm:gap-2 text-sm">
+            <a
+              href="#how-it-works"
+              className="hidden sm:inline-flex px-3 py-1.5 rounded-md text-foreground-secondary hover:text-foreground transition-colors"
+            >
               How it works
             </a>
-            <a href="#features" className="hidden sm:inline hover:text-foreground transition-colors">
+            <a
+              href="#features"
+              className="hidden sm:inline-flex px-3 py-1.5 rounded-md text-foreground-secondary hover:text-foreground transition-colors"
+            >
               Features
             </a>
-            <a href="/login" className="hover:text-foreground transition-colors">
+            <a
+              href="/login"
+              className="px-3 py-1.5 rounded-md text-foreground-secondary hover:text-foreground transition-colors"
+            >
               Sign in
             </a>
             <a
               href="/register"
-              className="rounded-lg bg-accent px-3 py-1.5 text-[#050A14] font-medium hover:bg-accent-hover transition-colors"
+              className="ml-1 rounded-md bg-accent px-3.5 py-1.5 text-sm font-medium text-[#050A14] hover:bg-accent-hover transition-colors"
             >
               Register
             </a>
@@ -43,32 +52,19 @@ export default function LandingPage() {
       </header>
 
       <main className="flex-1">
-        <section className="relative overflow-hidden pt-16 pb-20 sm:pt-24 sm:pb-28">
-          <div
-            className="absolute inset-0 -z-10 opacity-30"
-            style={{
-              background:
-                "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(0, 229, 255, 0.24), transparent)",
-            }}
-          />
-          <div className="mx-auto max-w-6xl px-4 sm:px-6 text-center">
-            <div className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 text-xs text-foreground-secondary mb-6 animate-fade-in">
-              <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
-              Persistent · Private · No signup
+        <section className="pt-12 pb-16 sm:pt-16 sm:pb-20">
+          <div className="mx-auto max-w-5xl px-4 sm:px-6">
+            <div className="max-w-2xl mx-auto text-center">
+              <h1 className="text-[1.875rem] leading-tight sm:text-4xl lg:text-[2.75rem] font-semibold tracking-tight text-foreground">
+                Email on your terms.
+              </h1>
+              <p className="mt-4 text-[15px] sm:text-base text-foreground-secondary leading-relaxed max-w-md mx-auto">
+                Create an inbox in seconds. Keep the addresses you need and
+                delete them whenever you&apos;re ready.
+              </p>
             </div>
 
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight text-balance animate-slide-up">
-              Disposable email that{" "}
-              <span className="text-accent">stays with you</span>
-            </h1>
-
-            <p className="mt-5 max-w-2xl mx-auto text-lg text-foreground-secondary text-balance animate-slide-up">
-              Generate a temporary address in one click. Keep it as long as you
-              need. Delete it when you&apos;re done. No accounts, no spam on
-              your real inbox.
-            </p>
-
-            <div className="mt-10">
+            <div className="mt-8 sm:mt-10">
               <EmailGenerator
                 domainConfigured={domainConfigured}
                 domainDisplay={domain}
@@ -78,109 +74,117 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section id="how-it-works" className="py-20 border-t border-border-subtle">
-          <div className="mx-auto max-w-6xl px-4 sm:px-6">
-            <div className="text-center mb-14">
-              <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight">
-                How {APP_NAME} works
+        <section id="how-it-works" className="py-16 sm:py-20 border-t border-border-subtle">
+          <div className="mx-auto max-w-5xl px-4 sm:px-6">
+            <div className="mb-10 sm:mb-12 max-w-lg">
+              <h2 className="text-xl sm:text-2xl font-semibold tracking-tight">
+                How it works
               </h2>
-              <p className="mt-3 text-foreground-secondary max-w-lg mx-auto">
-                Three steps to a clean, private inbox.
+              <p className="mt-2 text-sm text-foreground-secondary leading-relaxed">
+                Three steps. No account required to start.
               </p>
             </div>
 
-            <div className="grid gap-8 sm:grid-cols-3">
+            <div className="grid gap-6 sm:grid-cols-3 sm:gap-8">
               {[
                 {
                   icon: Zap,
                   step: "01",
                   title: "Generate",
-                  desc: "Create a random or custom address instantly. No registration required.",
+                  desc: "Create a random or custom address instantly.",
                 },
                 {
                   icon: Mail,
                   step: "02",
                   title: "Receive",
-                  desc: "Use the address anywhere. Messages appear in your private inbox in real time.",
+                  desc: "Messages appear in your private inbox as they arrive.",
                 },
                 {
                   icon: Trash2,
                   step: "03",
                   title: "Control",
-                  desc: "Keep the inbox as long as you need. Delete messages or the whole inbox when finished.",
+                  desc: "Keep an inbox as long as you need, then delete it.",
                 },
               ].map((item) => (
-                <div
-                  key={item.step}
-                  className="relative rounded-2xl border border-border bg-surface p-6 hover:border-accent/40 transition-colors"
-                >
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/15 text-accent">
-                      <item.icon className="h-5 w-5" />
-                    </div>
-                    <span className="text-xs font-mono text-muted">{item.step}</span>
+                <div key={item.step} className="flex gap-4 sm:block">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-accent">
+                    <item.icon className="h-4 w-4" aria-hidden />
                   </div>
-                  <h3 className="text-lg font-medium">{item.title}</h3>
-                  <p className="mt-2 text-sm text-foreground-secondary leading-relaxed">
-                    {item.desc}
-                  </p>
+                  <div className="sm:mt-4">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-[11px] font-mono text-muted">
+                        {item.step}
+                      </span>
+                      <h3 className="text-sm font-medium text-foreground">
+                        {item.title}
+                      </h3>
+                    </div>
+                    <p className="mt-1.5 text-sm text-foreground-secondary leading-relaxed">
+                      {item.desc}
+                    </p>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
         </section>
 
-        <section id="features" className="py-20 border-t border-border-subtle">
-          <div className="mx-auto max-w-6xl px-4 sm:px-6">
-            <div className="text-center mb-14">
-              <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight">
-                Built for privacy
+        <section id="features" className="py-16 sm:py-20 border-t border-border-subtle">
+          <div className="mx-auto max-w-5xl px-4 sm:px-6">
+            <div className="mb-10 sm:mb-12 max-w-lg">
+              <h2 className="text-xl sm:text-2xl font-semibold tracking-tight">
+                Built for everyday use
               </h2>
-              <p className="mt-3 text-foreground-secondary max-w-lg mx-auto">
-                Professional-grade temporary email without the usual trade-offs.
+              <p className="mt-2 text-sm text-foreground-secondary leading-relaxed">
+                Practical controls for temporary addresses without extra clutter.
               </p>
             </div>
 
-            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-px rounded-xl border border-border-subtle bg-border-subtle overflow-hidden sm:grid-cols-2 lg:grid-cols-3">
               {[
                 {
                   icon: Clock,
                   title: "Persistent inboxes",
-                  desc: "Addresses stay active until you delete them. No automatic expiry.",
+                  desc: "Addresses stay active until you delete them.",
                 },
                 {
                   icon: Shield,
                   title: "Secure access",
-                  desc: "Each inbox is protected by a high-entropy token, not a guessable ID.",
+                  desc: "Each inbox uses a high-entropy access token.",
                 },
                 {
                   icon: EyeOff,
-                  title: "No tracking",
-                  desc: "We don't sell data or inject ads. Your messages stay private.",
+                  title: "No ads or tracking",
+                  desc: "Your messages stay private on this service.",
                 },
                 {
                   icon: RefreshCw,
-                  title: "Live polling",
-                  desc: "Inbox refreshes automatically so verification codes appear quickly.",
+                  title: "Live refresh",
+                  desc: "The inbox updates automatically while you wait.",
                 },
                 {
                   icon: Lock,
                   title: "Sanitized HTML",
-                  desc: "Incoming HTML is scrubbed of scripts and dangerous content.",
+                  desc: "Incoming HTML is cleaned before it is shown.",
                 },
                 {
                   icon: Mail,
                   title: "Custom usernames",
-                  desc: "Choose a readable local-part when you need a professional-looking address.",
+                  desc: "Choose a readable local-part when you need one.",
                 },
               ].map((f) => (
                 <div
                   key={f.title}
-                  className="rounded-xl border border-border-subtle bg-surface/50 p-5 hover:bg-surface transition-colors"
+                  className="bg-background p-5 sm:p-6 hover:bg-surface/40 transition-colors"
                 >
-                  <f.icon className="h-5 w-5 text-accent mb-3" />
-                  <h3 className="font-medium text-sm">{f.title}</h3>
-                  <p className="mt-1.5 text-xs text-foreground-secondary leading-relaxed">
+                  <f.icon
+                    className="h-4 w-4 text-accent mb-3"
+                    aria-hidden
+                  />
+                  <h3 className="text-sm font-medium text-foreground">
+                    {f.title}
+                  </h3>
+                  <p className="mt-1 text-sm text-foreground-secondary leading-relaxed">
                     {f.desc}
                   </p>
                 </div>
@@ -190,14 +194,13 @@ export default function LandingPage() {
         </section>
       </main>
 
-      <footer className="border-t border-border-subtle py-10">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <footer className="border-t border-border-subtle py-8">
+        <div className="mx-auto max-w-5xl px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-3">
           <Logo size="sm" />
           <p className="text-xs text-muted text-center sm:text-right">
-            © {new Date().getFullYear()} {APP_NAME}. Temporary email for privacy.
-            <br className="sm:hidden" />
-            <span className="hidden sm:inline"> · </span>
-            Not affiliated with any email provider.
+            © {new Date().getFullYear()} {APP_NAME}
+            <span className="mx-1.5 text-border">·</span>
+            Temporary email for privacy
           </p>
         </div>
       </footer>
