@@ -114,7 +114,7 @@ export function AuthForm({
             {titles[mode]}
           </h1>
           <p className="text-sm text-foreground-secondary">
-            Permanent mailboxes tied to your Ghost Mail account.
+            Permanent mailboxes tied to your VeilMail account.
           </p>
         </div>
 
@@ -208,7 +208,7 @@ export function AuthForm({
 
         <p className="text-center text-xs text-muted">
           <Link href="/" className="hover:text-foreground transition-colors">
-            ← Back to Ghost Mail
+            ← Back to VeilMail
           </Link>
         </p>
       </div>

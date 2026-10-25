@@ -1,6 +1,6 @@
-export const APP_NAME = "Ghost Mail";
+export const APP_NAME = "VeilMail";
 export const APP_DESCRIPTION =
-  "Premium persistent temporary email. Protect your real inbox from spam, trackers, and data breaches.";
+  "Private, persistent email built for control. Protect your inbox with VeilMail.";
 
 /** Domain used for generated addresses. Must match the inbound provider domain. */
 export function getEmailDomain(): string {

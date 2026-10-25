@@ -16,9 +16,9 @@ export async function sendVerificationEmail(
   token: string
 ): Promise<{ sent: boolean; reason?: string }> {
   const link = `${appBaseUrl()}/verify-email?token=${encodeURIComponent(token)}`;
-  return sendTransactional(to, "Verify your Ghost Mail account", {
-    text: `Verify your Ghost Mail account by opening this link:\n\n${link}\n\nThis link expires in 24 hours. If you did not create an account, ignore this email.`,
-    html: `<p>Verify your Ghost Mail account:</p><p><a href="${link}">Verify email</a></p><p>This link expires in 24 hours.</p>`,
+  return sendTransactional(to, "Verify your VeilMail account", {
+    text: `Verify your VeilMail account by opening this link:\n\n${link}\n\nThis link expires in 24 hours. If you did not create an account, ignore this email.`,
+    html: `<p>Verify your VeilMail account:</p><p><a href="${link}">Verify email</a></p><p>This link expires in 24 hours.</p>`,
   });
 }
 
@@ -27,9 +27,9 @@ export async function sendPasswordResetEmail(
   token: string
 ): Promise<{ sent: boolean; reason?: string }> {
   const link = `${appBaseUrl()}/reset-password?token=${encodeURIComponent(token)}`;
-  return sendTransactional(to, "Reset your Ghost Mail password", {
+  return sendTransactional(to, "Reset your VeilMail password", {
     text: `Reset your password by opening this link:\n\n${link}\n\nThis link expires in 1 hour. If you did not request a reset, ignore this email.`,
-    html: `<p>Reset your Ghost Mail password:</p><p><a href="${link}">Reset password</a></p><p>This link expires in 1 hour.</p>`,
+    html: `<p>Reset your VeilMail password:</p><p><a href="${link}">Reset password</a></p><p>This link expires in 1 hour.</p>`,
   });
 }
 

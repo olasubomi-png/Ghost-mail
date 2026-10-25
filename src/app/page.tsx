@@ -34,7 +34,7 @@ export default function LandingPage() {
             </a>
             <a
               href="/register"
-              className="rounded-lg bg-accent px-3 py-1.5 text-white hover:bg-accent-hover transition-colors"
+              className="rounded-lg bg-accent px-3 py-1.5 text-[#050A14] font-medium hover:bg-accent-hover transition-colors"
             >
               Register
             </a>
@@ -48,7 +48,7 @@ export default function LandingPage() {
             className="absolute inset-0 -z-10 opacity-30"
             style={{
               background:
-                "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(139, 92, 246, 0.35), transparent)",
+                "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(0, 229, 255, 0.24), transparent)",
             }}
           />
           <div className="mx-auto max-w-6xl px-4 sm:px-6 text-center">

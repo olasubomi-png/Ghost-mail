@@ -1,4 +1,4 @@
-# Ghost Mail
+# VeilMail
 
 Premium persistent temporary email platform.
 
@@ -201,7 +201,7 @@ The previous `rate_limit_buckets` table is unused and may be dropped manually if
 
 ## User accounts (Milestone 1)
 
-Ghost Mail supports optional registered accounts with permanent owned mailboxes.
+VeilMail supports optional registered accounts with permanent owned mailboxes.
 
 ### Auth tables migration
 

@@ -358,7 +358,7 @@ export function InboxDashboard({ token }: InboxDashboardProps) {
               <h2 className="text-sm font-medium flex items-center gap-2">
                 Inbox
                 {unreadCount > 0 && (
-                  <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-[10px] font-semibold text-white">
+                  <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-[10px] font-semibold text-[#050A14]">
                     {unreadCount}
                   </span>
                 )}
@@ -612,7 +612,7 @@ export function InboxDashboard({ token }: InboxDashboardProps) {
                       <ShieldCheck className="h-3.5 w-3.5" />
                       Possible verification link
                       <span className="text-muted font-normal">
-                        · opens in a new tab · not verified by Ghost Mail
+                        · opens in a new tab · not verified by VeilMail
                       </span>
                     </div>
                     {links.map((link) => (

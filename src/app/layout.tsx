@@ -25,9 +25,10 @@ export const metadata: Metadata = {
     "disposable email",
     "temp mail",
     "privacy",
-    "ghost mail",
+    "veilmail",
+    "private email",
   ],
-  authors: [{ name: "Ghost Mail" }],
+  authors: [{ name: "VeilMail" }],
   applicationName: APP_NAME,
   icons: {
     icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
@@ -48,7 +49,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0a0a0b",
+  themeColor: "#050A14",
   width: "device-width",
   initialScale: 1,
 };

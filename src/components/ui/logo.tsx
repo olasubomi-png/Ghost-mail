@@ -31,7 +31,7 @@ export function Logo({
         s.text,
         className
       )}
-      aria-label="Ghost Mail home"
+      aria-label="VeilMail home"
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
@@ -44,7 +44,7 @@ export function Logo({
       />
       {wordmark && (
         <span className="select-none">
-          Ghost<span className="text-accent">Mail</span>
+          Veil<span className="text-accent">Mail</span>
         </span>
       )}
     </Link>
@@ -63,7 +63,7 @@ export function LogoMark({
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src="/ghost-mail-icon.svg"
-      alt="Ghost Mail"
+      alt="VeilMail"
       width={size}
       height={size}
       className={cn("shrink-0", className)}
