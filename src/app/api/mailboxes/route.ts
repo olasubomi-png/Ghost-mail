@@ -39,6 +39,15 @@ export async function POST(req: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    if (!user.emailVerified) {
+      return NextResponse.json(
+        {
+          error: "Verify your email before creating an inbox.",
+          code: "EMAIL_NOT_VERIFIED",
+        },
+        { status: 403 }
+      );
+    }
 
     const { success, remaining } = await rateLimit(`create:user:${user.id}`);
     if (!success) {

@@ -13,9 +13,12 @@ type Mode = "login" | "register" | "forgot" | "reset";
 export function AuthForm({
   mode,
   resetToken,
+  nextPath = "/dashboard",
 }: {
   mode: Mode;
   resetToken?: string;
+  /** Safe relative path to open after login/register */
+  nextPath?: string;
 }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -41,7 +44,7 @@ export function AuthForm({
         if (!data.verificationEmailSent) {
           toast.message("Check setup: verification email may need RESEND_API_KEY");
         }
-        router.push("/dashboard");
+        router.push(nextPath || "/dashboard");
         return;
       }
 
@@ -57,7 +60,7 @@ export function AuthForm({
           return;
         }
         toast.success("Signed in");
-        router.push("/dashboard");
+        router.push(nextPath || "/dashboard");
         return;
       }
 

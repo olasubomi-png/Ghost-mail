@@ -12,11 +12,13 @@ import { pushAddressHistory } from "@/lib/client/address-history";
 interface EmailGeneratorProps {
   domainConfigured: boolean;
   domainDisplay: string;
+  emailVerified?: boolean;
 }
 
 export function EmailGenerator({
   domainConfigured,
   domainDisplay,
+  emailVerified = true,
 }: EmailGeneratorProps) {
   const router = useRouter();
   const [customUsername, setCustomUsername] = useState("");
@@ -27,6 +29,12 @@ export function EmailGenerator({
 
   const generate = useCallback(
     async (localPart?: string) => {
+      if (!emailVerified) {
+        toast.error("Verify your email before creating an inbox.", {
+          description: "Check your inbox for a verification link, or resend from Account.",
+        });
+        return;
+      }
       if (!domainConfigured) {
         toast.error("Email domain is not configured yet.", {
           description:
@@ -45,6 +53,11 @@ export function EmailGenerator({
 
         const data = await res.json();
 
+        if (res.status === 401) {
+          toast.error("Sign in required");
+          router.push("/login?next=/");
+          return;
+        }
         if (!res.ok) {
           toast.error(data.error || "Failed to create address");
           return;
@@ -67,7 +80,7 @@ export function EmailGenerator({
         setIsGenerating(false);
       }
     },
-    [domainConfigured, router]
+    [domainConfigured, emailVerified, router]
   );
 
   const copyAddress = useCallback(async () => {
@@ -162,6 +175,15 @@ export function EmailGenerator({
           >
             Generate random address
           </Button>
+        )}
+
+        {!emailVerified && (
+          <p className="text-xs text-warning text-center leading-relaxed">
+            Verify your email to create inboxes.{" "}
+            <a href="/account" className="underline hover:text-foreground">
+              Account settings
+            </a>
+          </p>
         )}
 
         {!domainConfigured && (

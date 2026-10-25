@@ -70,12 +70,22 @@ describe("canAccessInbox ownership rules", () => {
     deletedAt: null,
   } as Inbox;
 
-  it("allows token access for anonymous inbox", () => {
+  it("denies access to anonymous (unowned) inboxes", () => {
     const inbox = { ...base, userId: null };
     expect(
       canAccessInbox(inbox, { token: base.accessToken, userId: null })
-    ).toBe(true);
-    expect(canAccessInbox(inbox, { token: "wrong", userId: null })).toBe(false);
+    ).toBe(false);
+    expect(
+      canAccessInbox(inbox, { token: base.accessToken, userId: "00000000-0000-0000-0000-000000000099" })
+    ).toBe(false);
+  });
+
+  it("denies token-only access even with a valid token", () => {
+    const owner = "00000000-0000-0000-0000-000000000099";
+    const inbox = { ...base, userId: owner };
+    expect(
+      canAccessInbox(inbox, { token: base.accessToken, userId: null })
+    ).toBe(false);
   });
 
   it("requires owning user for account-owned inbox", () => {
@@ -93,5 +103,21 @@ describe("canAccessInbox ownership rules", () => {
         userId: "00000000-0000-0000-0000-000000000088",
       })
     ).toBe(false);
+  });
+});
+
+import { safeRedirectPath } from "../src/lib/auth/redirect";
+
+describe("safeRedirectPath", () => {
+  it("allows relative paths", () => {
+    expect(safeRedirectPath("/dashboard")).toBe("/dashboard");
+    expect(safeRedirectPath("/inbox/abc")).toBe("/inbox/abc");
+  });
+
+  it("rejects open redirects", () => {
+    expect(safeRedirectPath("https://evil.com")).toBe("/dashboard");
+    expect(safeRedirectPath("//evil.com")).toBe("/dashboard");
+    expect(safeRedirectPath("javascript:alert(1)")).toBe("/dashboard");
+    expect(safeRedirectPath(null)).toBe("/dashboard");
   });
 });

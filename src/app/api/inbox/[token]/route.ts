@@ -71,7 +71,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const deleted = await softDeleteInbox(token);
+    const deleted = await softDeleteInbox(token, { userId: user?.id ?? null });
     if (!deleted) {
       return NextResponse.json({ error: "Inbox not found" }, { status: 404 });
     }

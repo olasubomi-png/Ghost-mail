@@ -155,27 +155,38 @@ export async function listInboxesByUser(userId: string): Promise<Inbox[]> {
 }
 
 /**
- * Access rules:
- * - Anonymous inbox (userId null): valid accessToken is enough.
- * - Owned inbox: caller must be the owning user (session). Token alone is insufficient.
+ * Access rules (account-required platform):
+ * - Caller must be authenticated and own the inbox (userId match).
+ * - Access token alone is never sufficient.
+ * - Legacy anonymous inboxes (userId null) are not accessible via the app UI/API.
+ *   Inbound webhooks still deliver by address lookup and do not use this helper.
  */
 export function canAccessInbox(
   inbox: Inbox,
   opts: { token?: string | null; userId?: string | null }
 ): boolean {
   if (inbox.deletedAt) return false;
-  if (inbox.userId) {
-    return Boolean(opts.userId && opts.userId === inbox.userId);
-  }
-  return Boolean(opts.token && opts.token === inbox.accessToken);
+  if (!inbox.userId) return false;
+  return Boolean(opts.userId && opts.userId === inbox.userId);
 }
 
-export async function softDeleteInbox(token: string): Promise<boolean> {
+export async function softDeleteInbox(
+  token: string,
+  opts?: { userId?: string | null }
+): Promise<boolean> {
   const db = getDb();
+  // Account-required: only the owning user may delete
+  if (!opts?.userId) return false;
   const result = await db
     .update(inboxes)
     .set({ deletedAt: new Date(), updatedAt: new Date() })
-    .where(and(eq(inboxes.accessToken, token), isNull(inboxes.deletedAt)))
+    .where(
+      and(
+        eq(inboxes.accessToken, token),
+        eq(inboxes.userId, opts.userId),
+        isNull(inboxes.deletedAt)
+      )
+    )
     .returning({ id: inboxes.id });
   return result.length > 0;
 }

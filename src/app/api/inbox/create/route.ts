@@ -9,11 +9,24 @@ export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
-    const ip =
-      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-      req.headers.get("x-real-ip") ||
-      "unknown";
-    const { success, remaining } = await rateLimit(`create:${ip}`);
+    const user = await getCurrentUser();
+    if (!user) {
+      return NextResponse.json(
+        { error: "Sign in required", code: "AUTH_REQUIRED" },
+        { status: 401 }
+      );
+    }
+    if (!user.emailVerified) {
+      return NextResponse.json(
+        {
+          error: "Verify your email before creating an inbox.",
+          code: "EMAIL_NOT_VERIFIED",
+        },
+        { status: 403 }
+      );
+    }
+
+    const { success, remaining } = await rateLimit(`create:user:${user.id}`);
     if (!success) {
       return NextResponse.json(
         { error: "Too many requests. Please wait a minute and try again." },
@@ -41,16 +54,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const user = await getCurrentUser();
     const inbox = await createInbox({
       localPart: parsed.data.localPart,
-      userId: user?.id ?? null,
+      userId: user.id,
     });
 
     return NextResponse.json(
       {
         address: inbox.address,
         accessToken: inbox.accessToken,
+        id: inbox.id,
         createdAt: inbox.createdAt,
       },
       {

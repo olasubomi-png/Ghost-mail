@@ -2,6 +2,8 @@ import { Logo } from "@/components/ui/logo";
 import { EmailGenerator } from "@/components/landing/email-generator";
 import { AddressHistory } from "@/components/landing/address-history";
 import { isDomainConfigured, getEmailDomain, APP_NAME } from "@/lib/constants";
+import { getCurrentUser } from "@/lib/auth/session";
+import { loginUrl, registerUrl } from "@/lib/auth/redirect";
 import {
   Shield,
   Clock,
@@ -13,9 +15,10 @@ import {
   Trash2,
 } from "lucide-react";
 
-export default function LandingPage() {
+export default async function LandingPage() {
   const domainConfigured = isDomainConfigured();
   const domain = getEmailDomain() || "yourdomain.com";
+  const user = await getCurrentUser();
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -35,18 +38,37 @@ export default function LandingPage() {
             >
               Features
             </a>
-            <a
-              href="/login"
-              className="px-3 py-1.5 rounded-md text-foreground-secondary hover:text-foreground transition-colors"
-            >
-              Sign in
-            </a>
-            <a
-              href="/register"
-              className="ml-1 rounded-md bg-accent px-3.5 py-1.5 text-sm font-medium text-[#050A14] hover:bg-accent-hover transition-colors"
-            >
-              Register
-            </a>
+            {user ? (
+              <>
+                <a
+                  href="/dashboard"
+                  className="px-3 py-1.5 rounded-md text-foreground-secondary hover:text-foreground transition-colors"
+                >
+                  Dashboard
+                </a>
+                <a
+                  href="/account"
+                  className="ml-1 rounded-md bg-accent px-3.5 py-1.5 text-sm font-medium text-[#050A14] hover:bg-accent-hover transition-colors"
+                >
+                  Account
+                </a>
+              </>
+            ) : (
+              <>
+                <a
+                  href={loginUrl()}
+                  className="px-3 py-1.5 rounded-md text-foreground-secondary hover:text-foreground transition-colors"
+                >
+                  Sign in
+                </a>
+                <a
+                  href={registerUrl()}
+                  className="ml-1 rounded-md bg-accent px-3.5 py-1.5 text-sm font-medium text-[#050A14] hover:bg-accent-hover transition-colors"
+                >
+                  Register
+                </a>
+              </>
+            )}
           </nav>
         </div>
       </header>
@@ -65,11 +87,37 @@ export default function LandingPage() {
             </div>
 
             <div className="mt-8 sm:mt-10">
-              <EmailGenerator
-                domainConfigured={domainConfigured}
-                domainDisplay={domain}
-              />
-              <AddressHistory />
+              {user ? (
+                <>
+                  <EmailGenerator
+                    domainConfigured={domainConfigured}
+                    domainDisplay={domain}
+                    emailVerified={user.emailVerified}
+                  />
+                  <AddressHistory authenticated />
+                </>
+              ) : (
+                <div className="mx-auto max-w-md rounded-xl border border-border bg-surface p-6 text-center space-y-4">
+                  <p className="text-sm text-foreground-secondary leading-relaxed">
+                    Create a free account to generate addresses and manage your
+                    inboxes securely.
+                  </p>
+                  <div className="flex flex-col sm:flex-row gap-2 sm:justify-center">
+                    <a
+                      href={registerUrl()}
+                      className="inline-flex h-11 items-center justify-center rounded-lg bg-accent px-5 text-sm font-medium text-[#050A14] hover:bg-accent-hover transition-colors"
+                    >
+                      Create account
+                    </a>
+                    <a
+                      href={loginUrl()}
+                      className="inline-flex h-11 items-center justify-center rounded-lg border border-border px-5 text-sm font-medium text-foreground hover:bg-surface-elevated transition-colors"
+                    >
+                      Sign in
+                    </a>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </section>

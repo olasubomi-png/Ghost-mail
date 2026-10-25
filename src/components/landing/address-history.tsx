@@ -4,32 +4,62 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Copy, Check, Trash2 } from "lucide-react";
-import {
-  loadAddressHistory,
-  removeAddressHistory,
-  type HistoryEntry,
-} from "@/lib/client/address-history";
 import { formatRelativeTime } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
-export function AddressHistory() {
+type Props = {
+  /** When true, load owned mailboxes from the API (authoritative). */
+  authenticated?: boolean;
+};
+
+type Row = {
+  id?: string;
+  address: string;
+  accessToken?: string;
+  createdAt: string;
+};
+
+export function AddressHistory({ authenticated = false }: Props) {
   const router = useRouter();
-  const [entries, setEntries] = useState<HistoryEntry[]>([]);
+  const [entries, setEntries] = useState<Row[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
 
-  useEffect(() => {
-    setEntries(loadAddressHistory());
-    setHydrated(true);
-
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === "ghostmail_address_history_v1") {
-        setEntries(loadAddressHistory());
+  const load = useCallback(async () => {
+    if (authenticated) {
+      try {
+        const res = await fetch("/api/mailboxes");
+        if (res.status === 401) {
+          setEntries([]);
+          setHydrated(true);
+          return;
+        }
+        if (!res.ok) throw new Error("failed");
+        const data = await res.json();
+        const rows: Row[] = (data.mailboxes || []).map(
+          (m: { id: string; address: string; createdAt: string }) => ({
+            id: m.id,
+            address: m.address,
+            createdAt: m.createdAt,
+          })
+        );
+        setEntries(rows);
+      } catch {
+        setEntries([]);
+      } finally {
+        setHydrated(true);
       }
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
+      return;
+    }
+
+    // Unauthenticated: no actionable device history
+    setEntries([]);
+    setHydrated(true);
+  }, [authenticated]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const copy = useCallback(async (address: string) => {
     try {
@@ -43,15 +73,60 @@ export function AddressHistory() {
   }, []);
 
   const openInbox = useCallback(
-    (entry: HistoryEntry) => {
-      router.push(`/inbox/${entry.accessToken}`);
+    async (entry: Row) => {
+      if (entry.id) {
+        try {
+          const res = await fetch(`/api/mailboxes/${entry.id}`);
+          if (res.status === 401) {
+            router.push("/login?next=/dashboard");
+            return;
+          }
+          if (!res.ok) {
+            toast.error("Could not open inbox");
+            return;
+          }
+          const data = await res.json();
+          if (data.accessToken) {
+            router.push(`/inbox/${data.accessToken}`);
+            return;
+          }
+        } catch {
+          toast.error("Could not open inbox");
+        }
+        return;
+      }
+      if (entry.accessToken) {
+        router.push(`/inbox/${entry.accessToken}`);
+      }
     },
     [router]
   );
 
-  const remove = useCallback((address: string) => {
-    setEntries(removeAddressHistory(address));
-    toast.success("Removed from this device");
+  const remove = useCallback(async (entry: Row) => {
+    if (!entry.id) return;
+    try {
+      const res = await fetch(`/api/mailboxes/${entry.id}`);
+      if (!res.ok) {
+        toast.error("Could not remove inbox");
+        return;
+      }
+      const data = await res.json();
+      if (!data.accessToken) {
+        toast.error("Could not remove inbox");
+        return;
+      }
+      const del = await fetch(`/api/inbox/${data.accessToken}`, {
+        method: "DELETE",
+      });
+      if (!del.ok) {
+        toast.error("Could not remove inbox");
+        return;
+      }
+      setEntries((prev) => prev.filter((e) => e.id !== entry.id));
+      toast.success("Inbox deleted");
+    } catch {
+      toast.error("Could not remove inbox");
+    }
   }, []);
 
   if (!hydrated) {
@@ -70,15 +145,15 @@ export function AddressHistory() {
     <div className="mt-8 max-w-md mx-auto text-left">
       <div className="flex items-baseline justify-between gap-3 mb-2 px-0.5">
         <h2 className="text-xs font-medium uppercase tracking-wide text-muted">
-          Recent
+          Your inboxes
         </h2>
-        <span className="text-[11px] text-muted">This device only</span>
+        <span className="text-[11px] text-muted">Synced to your account</span>
       </div>
 
       <ul className="divide-y divide-border-subtle border-t border-b border-border-subtle">
         {entries.map((entry) => (
           <li
-            key={entry.accessToken}
+            key={entry.id || entry.address}
             className="group flex items-center gap-2 py-3 min-h-[52px]"
           >
             <button
@@ -124,8 +199,8 @@ export function AddressHistory() {
               </button>
               <button
                 type="button"
-                onClick={() => remove(entry.address)}
-                aria-label="Remove from history"
+                onClick={() => remove(entry)}
+                aria-label="Delete inbox"
                 className={cn(
                   "inline-flex h-9 w-9 items-center justify-center rounded-md text-muted",
                   "hover:text-danger hover:bg-danger/10 transition-colors",
