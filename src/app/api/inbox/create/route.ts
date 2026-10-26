@@ -9,6 +9,7 @@ import { createInboxSchema } from "@/lib/validation";
 import { rateLimit } from "@/lib/rate-limit";
 import { isDomainConfigured } from "@/lib/constants";
 import { getCurrentUser } from "@/lib/auth/session";
+import { isOwnerEmail } from "@/lib/auth/owner";
 
 export const runtime = "nodejs";
 
@@ -59,25 +60,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const isOwner = isOwnerEmail(user.email);
     let spent = false;
-    try {
-      await spendOneCoinForInbox(
-        user.id,
-        parsed.data.localPart || "random"
-      );
-      spent = true;
-    } catch (err) {
-      if (err instanceof WalletError && err.code === "INSUFFICIENT_COINS") {
-        return NextResponse.json(
-          {
-            error: err.message,
-            code: "INSUFFICIENT_COINS",
-            billingPath: "/billing",
-          },
-          { status: 402 }
+    if (!isOwner) {
+      try {
+        await spendOneCoinForInbox(
+          user.id,
+          parsed.data.localPart || "random"
         );
+        spent = true;
+      } catch (err) {
+        if (err instanceof WalletError && err.code === "INSUFFICIENT_COINS") {
+          return NextResponse.json(
+            {
+              error: err.message,
+              code: "INSUFFICIENT_COINS",
+              billingPath: "/billing",
+            },
+            { status: 402 }
+          );
+        }
+        throw err;
       }
-      throw err;
     }
 
     let inbox;

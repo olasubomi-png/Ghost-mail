@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth/session";
+import { isOwnerEmail } from "@/lib/auth/owner";
 import { createInbox, listInboxesByUser, InboxError } from "@/lib/db/inboxes";
 import {
   spendOneCoinForInbox,
@@ -82,25 +83,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const isOwner = isOwnerEmail(user.email);
     let spent = false;
-    try {
-      await spendOneCoinForInbox(
-        user.id,
-        parsed.data.localPart || "random"
-      );
-      spent = true;
-    } catch (err) {
-      if (err instanceof WalletError && err.code === "INSUFFICIENT_COINS") {
-        return NextResponse.json(
-          {
-            error: err.message,
-            code: "INSUFFICIENT_COINS",
-            billingPath: "/billing",
-          },
-          { status: 402 }
+    if (!isOwner) {
+      try {
+        await spendOneCoinForInbox(
+          user.id,
+          parsed.data.localPart || "random"
         );
+        spent = true;
+      } catch (err) {
+        if (err instanceof WalletError && err.code === "INSUFFICIENT_COINS") {
+          return NextResponse.json(
+            {
+              error: err.message,
+              code: "INSUFFICIENT_COINS",
+              billingPath: "/billing",
+            },
+            { status: 402 }
+          );
+        }
+        throw err;
       }
-      throw err;
     }
 
     let inbox;
