@@ -156,7 +156,58 @@ export const rateLimitCounters = pgTable("rate_limit_counters", {
   hitCount: integer("hit_count").notNull().default(0),
 });
 
+
+/** Veil Coin balance per user (integer coins, never trust client). */
+export const wallets = pgTable("wallets", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  balance: integer("balance").notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+/**
+ * Ledger of purchases, spends, and refunds.
+ * type: purchase | spend | refund
+ * status: pending | success | failed
+ */
+export const walletTransactions = pgTable(
+  "wallet_transactions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    coins: integer("coins").notNull(),
+    amountKobo: integer("amount_kobo"),
+    currency: text("currency"),
+    status: text("status").notNull().default("pending"),
+    reference: text("reference").notNull(),
+    paystackReference: text("paystack_reference"),
+    metadata: text("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("wallet_tx_reference_idx").on(table.reference),
+    uniqueIndex("wallet_tx_paystack_ref_idx")
+      .on(table.paystackReference)
+      .where(sql`paystack_reference IS NOT NULL`),
+    index("wallet_tx_user_id_idx").on(table.userId),
+    index("wallet_tx_user_created_idx").on(table.userId, table.createdAt),
+  ]
+);
+
 export type User = typeof users.$inferSelect;
+export type Wallet = typeof wallets.$inferSelect;
+export type WalletTransaction = typeof walletTransactions.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
 export type AuthToken = typeof authTokens.$inferSelect;
 export type Inbox = typeof inboxes.$inferSelect;

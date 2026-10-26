@@ -225,3 +225,15 @@ before enabling accounts in production (or run `npm run db:push` after reviewing
 - Anonymous inboxes continue to work with access tokens
 - Auth endpoints are rate-limited
 
+
+
+## Veil Coins (billing)
+
+Creating a **new** email address costs **1 Veil Coin**. Existing inboxes are free to open and receive mail.
+
+1. Apply migration `src/lib/db/migrations/0002_veil_coins.sql` in the Neon SQL editor.
+2. Set `PAYSTACK_SECRET_KEY` in Vercel.
+3. In Paystack Dashboard, add webhook: `https://your-domain/api/webhook/paystack` (event: `charge.success`).
+4. Users buy packages on `/billing` (minimum 10 coins).
+
+Packages (NGN): 10 / ₦1,099 · 15 / ₦1,648.50 · 20 / ₦2,198 · 50 / ₦5,495.

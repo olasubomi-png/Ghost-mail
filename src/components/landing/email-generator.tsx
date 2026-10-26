@@ -59,6 +59,15 @@ export function EmailGenerator({
           return;
         }
         if (!res.ok) {
+          if (data.code === "INSUFFICIENT_COINS") {
+            toast.error(data.error || "Not enough Veil Coins", {
+              action: {
+                label: "Billing",
+                onClick: () => router.push("/billing"),
+              },
+            });
+            return;
+          }
           toast.error(data.error || "Failed to create address");
           return;
         }

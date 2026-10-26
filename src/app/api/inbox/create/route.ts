@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createInbox, InboxError } from "@/lib/db/inboxes";
+import {
+  spendOneCoinForInbox,
+  refundOneCoin,
+  WalletError,
+} from "@/lib/billing/wallet";
 import { createInboxSchema } from "@/lib/validation";
 import { rateLimit } from "@/lib/rate-limit";
 import { isDomainConfigured } from "@/lib/constants";
@@ -54,10 +59,46 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const inbox = await createInbox({
-      localPart: parsed.data.localPart,
-      userId: user.id,
-    });
+    let spent = false;
+    try {
+      await spendOneCoinForInbox(
+        user.id,
+        parsed.data.localPart || "random"
+      );
+      spent = true;
+    } catch (err) {
+      if (err instanceof WalletError && err.code === "INSUFFICIENT_COINS") {
+        return NextResponse.json(
+          {
+            error: err.message,
+            code: "INSUFFICIENT_COINS",
+            billingPath: "/billing",
+          },
+          { status: 402 }
+        );
+      }
+      throw err;
+    }
+
+    let inbox;
+    try {
+      inbox = await createInbox({
+        localPart: parsed.data.localPart,
+        userId: user.id,
+      });
+    } catch (err) {
+      if (spent) {
+        try {
+          await refundOneCoin(user.id, "inbox_create_failed");
+        } catch (refundErr) {
+          console.error(
+            "[inbox create] refund failed",
+            refundErr instanceof Error ? refundErr.message : "unknown"
+          );
+        }
+      }
+      throw err;
+    }
 
     return NextResponse.json(
       {

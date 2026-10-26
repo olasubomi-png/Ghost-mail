@@ -15,7 +15,7 @@ function mustBypass(url) {
   if (p.startsWith("/api/")) return true;
   if (p.startsWith("/_next/")) return true; // always network — avoid stale hashed bundles
   if (p.startsWith("/inbox/")) return true;
-  if (p.startsWith("/dashboard") || p.startsWith("/account")) return true;
+  if (p.startsWith("/dashboard") || p.startsWith("/account") || p.startsWith("/billing")) return true;
   if (
     p.startsWith("/login") ||
     p.startsWith("/register") ||

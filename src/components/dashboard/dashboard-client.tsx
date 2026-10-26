@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Settings,
   Mail,
+  Coins,
 } from "lucide-react";
 import { Logo } from "@/components/ui/logo";
 import { Button } from "@/components/ui/button";
@@ -134,6 +135,13 @@ export default function DashboardClient() {
         <div className="mx-auto max-w-3xl px-4 h-14 flex items-center justify-between gap-3">
           <Logo />
           <div className="flex items-center gap-1.5">
+            <Link
+              href="/billing"
+              aria-label="Billing"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-foreground-secondary hover:bg-surface-elevated hover:text-foreground"
+            >
+              <Coins className="h-4 w-4" />
+            </Link>
             <Link
               href="/account"
               aria-label="Account settings"
