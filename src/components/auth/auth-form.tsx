@@ -24,6 +24,7 @@ export function AuthForm({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [registeredEmail, setRegisteredEmail] = useState<string | null>(null);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -40,11 +41,16 @@ export function AuthForm({
           toast.error(data.error || "Registration failed");
           return;
         }
-        toast.success("Account created");
         if (!data.verificationEmailSent) {
-          toast.message("Check setup: verification email may need RESEND_API_KEY");
+          toast.error(
+            "Account created, but we could not send a verification email. Check RESEND_API_KEY or try again later."
+          );
+          // Still allow sign-in attempt; mailbox create requires verification
+          setRegisteredEmail(email.trim());
+          return;
         }
-        router.push(nextPath || "/dashboard");
+        setRegisteredEmail(email.trim());
+        toast.success("Check your email to verify your account");
         return;
       }
 
@@ -105,6 +111,43 @@ export function AuthForm({
     forgot: "Reset password",
     reset: "Choose a new password",
   };
+
+  if (registeredEmail) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center px-4 py-12">
+        <div className="w-full max-w-md space-y-8">
+          <div className="text-center space-y-3">
+            <div className="flex justify-center">
+              <Logo />
+            </div>
+            <h1 className="text-2xl font-semibold tracking-tight">Check your email</h1>
+            <p className="text-sm text-foreground-secondary leading-relaxed">
+              We sent a verification link to{" "}
+              <span className="text-foreground font-medium">{registeredEmail}</span>.
+              Open that link to verify your account before creating mailboxes.
+            </p>
+          </div>
+          <div className="space-y-3">
+            <Button
+              type="button"
+              className="w-full text-[#050A14]"
+              onClick={() => router.push("/login")}
+            >
+              Continue to sign in
+            </Button>
+            <p className="text-center text-xs text-muted">
+              Did not get the email? Check spam, or try registering again later.
+            </p>
+            <p className="text-center text-xs text-muted">
+              <Link href="/" className="hover:text-foreground">
+                ← Back to VeilMail
+              </Link>
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4 py-12">
