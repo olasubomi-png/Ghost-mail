@@ -1,4 +1,4 @@
-import { eq, sql, desc, and } from "drizzle-orm";
+import { eq, sql, desc } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { wallets, walletTransactions } from "@/lib/db/schema";
 import { COINS_PER_INBOX } from "./packages";

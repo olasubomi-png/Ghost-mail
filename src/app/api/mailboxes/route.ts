@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth/session";
 import { createInbox, listInboxesByUser, InboxError } from "@/lib/db/inboxes";
+import {
+  spendOneCoinForInbox,
+  refundOneCoin,
+  WalletError,
+} from "@/lib/billing/wallet";
 import { createInboxSchema } from "@/lib/validation";
 import { rateLimit } from "@/lib/rate-limit";
 import { isDomainConfigured } from "@/lib/constants";
